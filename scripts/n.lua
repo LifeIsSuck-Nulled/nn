@@ -11,7 +11,7 @@ local TargetItemsGrocery = {}
 local MasterPC = false 
 local MasterGrocery = false 
 local AutoAppoint = false 
-local AutoChef = false -- NEW: Auto Chef Variable
+local AutoChef = false 
 local CurrentWebhook = "https://webhook.lewisakura.moe/api/webhooks/1530035274422161498/OxDOGd_v9FeYoou_JeSI1odFo_Wfj1oj3V5Hv1QFoRtewlihYIYdiO2DX16YtZVIyO-7"
 local fetch = request or http_request or (syn and syn.request)
 
@@ -39,7 +39,6 @@ pcall(function()
     SelectPCRemote = Net:RemoteEvent("selectPC")
     AppointRemote = Net:RemoteEvent("AppointNPC")
     
-    -- Cooking & Snack Remotes
     CookEvent = Net:RemoteEvent("CookEvent")
     DeliverEvent = Net:RemoteEvent("DeliverEvent")
     SelectTrayOrder = Net:RemoteEvent("SelectTrayOrder")
@@ -68,7 +67,6 @@ openBtn.TextSize = 14
 openBtn.Parent = gui
 Instance.new("UICorner", openBtn).CornerRadius = UDim.new(0, 6)
 
--- Expanded UI to fit 4 buttons
 local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.new(0, 480, 0, 380) 
 mainFrame.Position = UDim2.new(0.5, -240, 0.5, -190)
@@ -254,7 +252,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO CHEF (COOK, SNACK & DELIVER)
+-- AUTO CHEF (FIXED TP & NUMBER CASTING)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -280,45 +278,53 @@ task.spawn(function()
                     end
                 end
                 
-                -- 2. If we have food on the tray, DELIVER IT first
+                -- 2. DELIVER FOOD (Fixed PC Scanner & Teleport)
                 if #trayItems > 0 then
                     local targetTrayItem = trayItems[1]
-                    local orderId = targetTrayItem.Name:gsub("TrayOrder_", "")
-                    local pcLabel = targetTrayItem:FindFirstChild("PcNumber")
                     
+                    -- Ligtas na kino-convert ang ID pabalik sa number para hindi ma-reject ng server
+                    local rawId = targetTrayItem.Name:gsub("TrayOrder_", "")
+                    local orderId = tonumber(rawId) or rawId 
+                    
+                    local pcLabel = targetTrayItem:FindFirstChild("PcNumber")
                     if pcLabel then
-                        -- Format looks like "PC #1" or "PC 1". Extract the exact number.
-                        local pcTargetName = pcLabel.Text:gsub("PC #", ""):gsub("PC ", "")
+                        local pcNumber = pcLabel.Text:match("%d+") -- Kinukuha lang yung number
                         
-                        -- Find the PC model in Workspace to TP to
-                        local foundPC = nil
-                        for _, obj in ipairs(workspace:GetDescendants()) do
-                            if obj.Name == pcTargetName and (obj.Parent and (obj.Parent.Name == "PcList" or obj.Parent.Name == "PCs")) then
-                                foundPC = obj
-                                break
-                            elseif obj:IsA("ProximityPrompt") and obj.Parent and obj.Parent.Name == pcTargetName then
-                                foundPC = obj.Parent
-                                break
-                            end
-                        end
-                        
-                        if foundPC and foundPC:IsA("BasePart") then
-                            -- Teleport to Customer
-                            hrp.CFrame = foundPC.CFrame * CFrame.new(0, 3, 2.5)
-                            task.wait(0.2)
-                            if humanoid then humanoid.Sit = false end
-                            task.wait(0.3)
+                        if pcNumber then
+                            local foundPart = nil
+                            local targetNames = {"PC" .. pcNumber, "PC " .. pcNumber, "Pc" .. pcNumber, "pc" .. pcNumber}
                             
-                            -- Deliver the order
+                            -- Hahanapin ang PC Model o Part
+                            for _, obj in ipairs(workspace:GetDescendants()) do
+                                if table.find(targetNames, obj.Name) then
+                                    if obj:IsA("Model") then
+                                        foundPart = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)
+                                        break
+                                    elseif obj:IsA("BasePart") then
+                                        foundPart = obj
+                                        break
+                                    end
+                                end
+                            end
+                            
+                            -- Kung nakita yung PC, mag-teleport sa harap
+                            if foundPart then
+                                hrp.CFrame = foundPart.CFrame * CFrame.new(0, 3, 2.5)
+                                task.wait(0.2)
+                                if humanoid then humanoid.Sit = false end
+                                task.wait(0.3)
+                            end
+                            
+                            -- I-serve na yung pagkain!
                             if SelectTrayOrder then
                                 SelectTrayOrder:FireServer(orderId)
                             end
-                            task.wait(1) -- Wait for delivery animation/sync
+                            task.wait(1)
                         end
                     end
                 end
                 
-                -- 3. If Tray is NOT full (< 3 items), prepare more food/snacks
+                -- 3. PREPARE MORE FOOD (< 3 tray items)
                 if #trayItems < 3 then
                     
                     -- A. Check if cooked food is ready to plate
@@ -328,9 +334,10 @@ task.spawn(function()
                             if v:IsA("Frame") and v:GetAttribute("CookingRuntimeCard") then
                                 local btn = v:FindFirstChild("Button", true)
                                 if btn and btn.Text == "Deliver" and DeliverEvent then
-                                    DeliverEvent:FireServer(v.Name)
+                                    local orderId = tonumber(v.Name) or v.Name
+                                    DeliverEvent:FireServer(orderId)
                                     task.wait(0.5)
-                                    return -- Wait for next loop to process
+                                    return
                                 end
                             end
                         end
@@ -341,7 +348,8 @@ task.spawn(function()
                     if snackOrders then
                         for _, v in ipairs(snackOrders:GetChildren()) do
                             if v:IsA("Frame") and v:GetAttribute("SnackRuntimeCard") and DeliverEvent then
-                                DeliverEvent:FireServer(v.Name)
+                                local orderId = tonumber(v.Name) or v.Name
+                                DeliverEvent:FireServer(orderId)
                                 task.wait(0.5)
                                 return
                             end
@@ -355,14 +363,14 @@ task.spawn(function()
                             if v:IsA("Frame") and v:GetAttribute("CookingRuntimeCard") and CookEvent then
                                 local foodLbl = v:FindFirstChild("FoodName", true)
                                 if foodLbl then
-                                    CookEvent:FireServer(foodLbl.Text, v.Name)
+                                    local orderId = tonumber(v.Name) or v.Name
+                                    CookEvent:FireServer(foodLbl.Text, orderId)
                                     task.wait(0.5)
                                     return
                                 end
                             end
                         end
                     end
-                    
                 end
             end)
         end
