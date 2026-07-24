@@ -6,8 +6,11 @@ local VirtualUser = game:GetService("VirtualUser")
 -- ==========================================
 -- SYSTEM VARIABLES
 -- ==========================================
-local TargetItems = {}
-local MasterAutoBuy = false 
+local TargetItemsPC = {}
+local TargetItemsGrocery = {}
+local MasterPC = false 
+local MasterGrocery = false 
+local AutoAppoint = false -- NEW: Auto Appoint Variable
 local CurrentWebhook = "https://webhook.lewisakura.moe/api/webhooks/1530035274422161498/OxDOGd_v9FeYoou_JeSI1odFo_Wfj1oj3V5Hv1QFoRtewlihYIYdiO2DX16YtZVIyO-7"
 local fetch = request or http_request or (syn and syn.request)
 
@@ -22,16 +25,19 @@ end)
 -- ==========================================
 -- MODULE REQUIRES
 -- ==========================================
-local ShopConfig, StockServiceModule, Net, ShopPurchaseRemote
+local ShopConfig, StockServiceModule, Net, ShopPurchaseRemote, SelectPCRemote, AppointRemote
 pcall(function()
     ShopConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Scripts"):WaitForChild("SHOP_CONFIG"))
     StockServiceModule = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Scripts"):WaitForChild("Packages"):WaitForChild("StockService"))
     Net = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Scripts"):WaitForChild("Packages"):WaitForChild("Net"))
+    
     ShopPurchaseRemote = Net:RemoteEvent("ShopPurchase")
+    SelectPCRemote = Net:RemoteEvent("selectPC")
+    AppointRemote = Net:RemoteEvent("AppointNPC")
 end)
 
 -- ==========================================
--- TRUFF HUB UI SETUP (100% SAFE LOAD)
+-- TRUFF HUB UI SETUP
 -- ==========================================
 local guiName = "TruffHubGUI"
 local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
@@ -42,7 +48,6 @@ gui.Name = guiName
 gui.ResetOnSpawn = false
 gui.Parent = playerGui
 
--- Floating Open Button
 local openBtn = Instance.new("TextButton")
 openBtn.Size = UDim2.new(0, 130, 0, 40)
 openBtn.Position = UDim2.new(0, 10, 0, 10)
@@ -54,10 +59,10 @@ openBtn.TextSize = 14
 openBtn.Parent = gui
 Instance.new("UICorner", openBtn).CornerRadius = UDim.new(0, 6)
 
--- Main Frame (Landscape for Mobile)
+-- Increased height to fit 3 buttons comfortably
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 450, 0, 280)
-mainFrame.Position = UDim2.new(0.5, -225, 0.5, -140)
+mainFrame.Size = UDim2.new(0, 480, 0, 330) 
+mainFrame.Position = UDim2.new(0.5, -240, 0.5, -165)
 mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 mainFrame.Visible = false
 mainFrame.Active = true
@@ -80,9 +85,8 @@ closeBtn.Parent = mainFrame
 openBtn.MouseButton1Click:Connect(function() mainFrame.Visible = true; openBtn.Visible = false end)
 closeBtn.MouseButton1Click:Connect(function() mainFrame.Visible = false; openBtn.Visible = true end)
 
--- Sidebar
 local sidebar = Instance.new("Frame")
-sidebar.Size = UDim2.new(0, 120, 1, 0)
+sidebar.Size = UDim2.new(0, 130, 1, 0)
 sidebar.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
 sidebar.Parent = mainFrame
 Instance.new("UICorner", sidebar).CornerRadius = UDim.new(0, 8)
@@ -96,10 +100,9 @@ title.Font = Enum.Font.GothamBlack
 title.TextSize = 16
 title.Parent = sidebar
 
--- Tab Container (Right Side)
 local contentFrame = Instance.new("Frame")
-contentFrame.Size = UDim2.new(1, -120, 1, 0)
-contentFrame.Position = UDim2.new(0, 120, 0, 0)
+contentFrame.Size = UDim2.new(1, -130, 1, 0)
+contentFrame.Position = UDim2.new(0, 130, 0, 0)
 contentFrame.BackgroundTransparency = 1
 contentFrame.Parent = mainFrame
 
@@ -115,7 +118,7 @@ local function createTab(name, icon, order)
     btn.Text = " " .. icon .. " " .. name
     btn.TextXAlignment = Enum.TextXAlignment.Left
     btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 13
+    btn.TextSize = 12
     btn.Parent = sidebar
     Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
     
@@ -139,12 +142,60 @@ local function createTab(name, icon, order)
 end
 
 local homeTab = createTab("Home", "🏠", 0)
-local snipeTab = createTab("Snipe", "🎯", 1)
-local setTab = createTab("Settings", "⚙️", 2)
+local pcTab = createTab("PC Parts", "💻", 1)
+local groceryTab = createTab("Grocery", "🍎", 2)
+local setTab = createTab("Settings", "⚙️", 3)
 
 tabs["Home"].Visible = true
 tabButtons["Home"].BackgroundColor3 = Color3.fromRGB(50, 50, 60)
 tabButtons["Home"].TextColor3 = Color3.fromRGB(255, 255, 255)
+
+-- ==========================================
+-- INSTANT SNIPE FUNCTION
+-- ==========================================
+local function triggerInstantSnipe(shopId, targetDict)
+    task.spawn(function()
+        pcall(function()
+            if StockServiceModule and ShopPurchaseRemote then
+                local currentStock = StockServiceModule:GetAll(shopId)
+                if type(currentStock) == "table" then
+                    for itemName, quantity in pairs(currentStock) do
+                        if type(quantity) == "number" and quantity > 0 and targetDict[itemName] then
+                            print("[INSTANT SNIPE] Found " .. itemName .. " in " .. shopId .. "! Buying...")
+                            ShopPurchaseRemote:FireServer(shopId, itemName, quantity)
+                        end
+                    end
+                end
+            end
+        end)
+    end)
+end
+
+-- ==========================================
+-- AUTO APPOINT LOOP
+-- ==========================================
+task.spawn(function()
+    while true do
+        task.wait(1.5) -- Scans every 1.5 seconds
+        if AutoAppoint then
+            pcall(function()
+                local pcList = Players.LocalPlayer.PlayerGui.MainUi.ServerFrame.PcList
+                for _, pcFrame in ipairs(pcList:GetChildren()) do
+                    if not AutoAppoint then break end
+                    if pcFrame:IsA("Frame") then
+                        local pcName = pcFrame.Name
+                        if SelectPCRemote and AppointRemote then
+                            SelectPCRemote:FireServer(pcName)
+                            task.wait(0.05)
+                            AppointRemote:FireServer(pcName)
+                            task.wait(0.1) -- Small gap to prevent server spam kicking
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
 
 -- ==========================================
 -- 🏠 HOME TAB CONTENT
@@ -153,25 +204,47 @@ local homeTitle = Instance.new("TextLabel")
 homeTitle.Size = UDim2.new(1, 0, 0, 40)
 homeTitle.BackgroundTransparency = 1
 homeTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-homeTitle.Text = "Dashboard"
+homeTitle.Text = "Dashboard Controls"
 homeTitle.Font = Enum.Font.GothamBold
-homeTitle.TextSize = 18
+homeTitle.TextSize = 16
 homeTitle.Parent = homeTab
 
-local masterToggle = Instance.new("TextButton")
-masterToggle.Size = UDim2.new(0.8, 0, 0, 50)
-masterToggle.Position = UDim2.new(0.1, 0, 0.3, 0)
-masterToggle.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-masterToggle.TextColor3 = Color3.fromRGB(255, 255, 255)
-masterToggle.Text = "⛔ MASTER AUTO-BUY: OFF"
-masterToggle.Font = Enum.Font.GothamBlack
-masterToggle.TextSize = 14
-masterToggle.Parent = homeTab
-Instance.new("UICorner", masterToggle).CornerRadius = UDim.new(0, 8)
+local togglePC = Instance.new("TextButton")
+togglePC.Size = UDim2.new(0.85, 0, 0, 45)
+togglePC.Position = UDim2.new(0.075, 0, 0.15, 0)
+togglePC.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+togglePC.TextColor3 = Color3.fromRGB(255, 255, 255)
+togglePC.Text = "💻 PC AUTO-BUY: OFF"
+togglePC.Font = Enum.Font.GothamBlack
+togglePC.TextSize = 13
+togglePC.Parent = homeTab
+Instance.new("UICorner", togglePC).CornerRadius = UDim.new(0, 6)
+
+local toggleGrocery = Instance.new("TextButton")
+toggleGrocery.Size = UDim2.new(0.85, 0, 0, 45)
+toggleGrocery.Position = UDim2.new(0.075, 0, 0.35, 0)
+toggleGrocery.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+toggleGrocery.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: OFF"
+toggleGrocery.Font = Enum.Font.GothamBlack
+toggleGrocery.TextSize = 13
+toggleGrocery.Parent = homeTab
+Instance.new("UICorner", toggleGrocery).CornerRadius = UDim.new(0, 6)
+
+local toggleAppoint = Instance.new("TextButton")
+toggleAppoint.Size = UDim2.new(0.85, 0, 0, 45)
+toggleAppoint.Position = UDim2.new(0.075, 0, 0.55, 0)
+toggleAppoint.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+toggleAppoint.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: OFF"
+toggleAppoint.Font = Enum.Font.GothamBlack
+toggleAppoint.TextSize = 13
+toggleAppoint.Parent = homeTab
+Instance.new("UICorner", toggleAppoint).CornerRadius = UDim.new(0, 6)
 
 local statusText = Instance.new("TextLabel")
 statusText.Size = UDim2.new(1, 0, 0, 30)
-statusText.Position = UDim2.new(0, 0, 0.6, 0)
+statusText.Position = UDim2.new(0, 0, 0.75, 0)
 statusText.BackgroundTransparency = 1
 statusText.TextColor3 = Color3.fromRGB(150, 150, 150)
 statusText.Text = "Status: 🛡️ Anti-AFK Active | 📡 Waiting for Server..."
@@ -179,147 +252,145 @@ statusText.Font = Enum.Font.GothamSemibold
 statusText.TextSize = 12
 statusText.Parent = homeTab
 
-masterToggle.MouseButton1Click:Connect(function()
-    MasterAutoBuy = not MasterAutoBuy
-    if MasterAutoBuy then
-        masterToggle.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        masterToggle.Text = "✅ MASTER AUTO-BUY: ACTIVE"
-        
-        -- INSTANT SNIPE CHECK: Awtomatikong maghahanap kung may available na target ngayon
-        task.spawn(function()
-            pcall(function()
-                if StockServiceModule and ShopPurchaseRemote then
-                    local shops = {"PcParts", "Grocery"}
-                    for _, shopId in ipairs(shops) do
-                        local currentStock = StockServiceModule:GetAll(shopId)
-                        if type(currentStock) == "table" then
-                            for itemName, quantity in pairs(currentStock) do
-                                if type(quantity) == "number" and quantity > 0 and TargetItems[itemName] then
-                                    print("[INSTANT SNIPE] Found " .. itemName .. " in current stock! Buying...")
-                                    ShopPurchaseRemote:FireServer(shopId, itemName, quantity)
-                                end
-                            end
-                        end
-                    end
-                end
-            end)
-        end)
+togglePC.MouseButton1Click:Connect(function()
+    MasterPC = not MasterPC
+    if MasterPC then
+        togglePC.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+        togglePC.Text = "💻 PC AUTO-BUY: ACTIVE"
+        triggerInstantSnipe("PcParts", TargetItemsPC)
     else
-        masterToggle.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        masterToggle.Text = "⛔ MASTER AUTO-BUY: OFF"
+        togglePC.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+        togglePC.Text = "💻 PC AUTO-BUY: OFF"
+    end
+end)
+
+toggleGrocery.MouseButton1Click:Connect(function()
+    MasterGrocery = not MasterGrocery
+    if MasterGrocery then
+        toggleGrocery.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+        toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: ACTIVE"
+        triggerInstantSnipe("Grocery", TargetItemsGrocery)
+    else
+        toggleGrocery.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+        toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: OFF"
+    end
+end)
+
+toggleAppoint.MouseButton1Click:Connect(function()
+    AutoAppoint = not AutoAppoint
+    if AutoAppoint then
+        toggleAppoint.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+        toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: ACTIVE"
+    else
+        toggleAppoint.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+        toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: OFF"
     end
 end)
 
 -- ==========================================
--- 🎯 SNIPE TAB CONTENT
+-- DATA PROCESSING (SPLIT PC & GROCERY)
 -- ==========================================
-local dropdownBtn = Instance.new("TextButton")
-dropdownBtn.Size = UDim2.new(0.9, 0, 0, 30)
-dropdownBtn.Position = UDim2.new(0.05, 0, 0, 10)
-dropdownBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-dropdownBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
-dropdownBtn.Text = "Category: ALL ▼"
-dropdownBtn.Font = Enum.Font.GothamSemibold
-dropdownBtn.TextSize = 12
-dropdownBtn.Parent = snipeTab
-Instance.new("UICorner", dropdownBtn).CornerRadius = UDim.new(0, 4)
-Instance.new("UIStroke", dropdownBtn).Color = Color3.fromRGB(60, 60, 70)
-
-local itemScroll = Instance.new("ScrollingFrame")
-itemScroll.Size = UDim2.new(0.9, 0, 1, -55)
-itemScroll.Position = UDim2.new(0.05, 0, 0, 45)
-itemScroll.BackgroundTransparency = 1
-itemScroll.ScrollBarThickness = 4
-itemScroll.Parent = snipeTab
-local itemLayout = Instance.new("UIListLayout", itemScroll)
-itemLayout.Padding = UDim.new(0, 4)
-
-local dropdownFrame = Instance.new("ScrollingFrame")
-dropdownFrame.Size = UDim2.new(0.9, 0, 0, 150)
-dropdownFrame.Position = UDim2.new(0.05, 0, 0, 45)
-dropdownFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-dropdownFrame.ScrollBarThickness = 4
-dropdownFrame.ZIndex = 10
-dropdownFrame.Visible = false
-dropdownFrame.Parent = snipeTab
-Instance.new("UICorner", dropdownFrame)
-local dropLayout = Instance.new("UIListLayout", dropdownFrame)
-
-local guiItems = {}
-local categories = { ["All"] = true }
+local guiItemsPC = {}
+local guiItemsGrocery = {}
+local pcCategories = { ["All"] = true }
 
 if ShopConfig and type(ShopConfig.Items) == "table" then
     for itemName, itemData in pairs(ShopConfig.Items) do
         local cat = itemData.Category or "Other"
-        categories[cat] = true
-        table.insert(guiItems, {
+        local itemEntry = {
             name = tostring(itemName),
             category = cat,
             stars = itemData.Stars or 0,
             price = itemData.Price or 0
-        })
+        }
+        if cat == "Grocery" then
+            table.insert(guiItemsGrocery, itemEntry)
+        else
+            pcCategories[cat] = true
+            table.insert(guiItemsPC, itemEntry)
+        end
     end
 end
 
-table.sort(guiItems, function(a, b)
+local function sortItems(a, b)
     if a.stars ~= b.stars then return a.stars > b.stars
     else return a.price > b.price end
-end)
+end
+table.sort(guiItemsPC, sortItems)
+table.sort(guiItemsGrocery, sortItems)
 
-local currentFilter = "All"
+-- ==========================================
+-- 💻 PC PARTS TAB CONTENT
+-- ==========================================
+local pcDropdownBtn = Instance.new("TextButton")
+pcDropdownBtn.Size = UDim2.new(0.9, 0, 0, 30)
+pcDropdownBtn.Position = UDim2.new(0.05, 0, 0, 10)
+pcDropdownBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+pcDropdownBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+pcDropdownBtn.Text = "Category: ALL ▼"
+pcDropdownBtn.Font = Enum.Font.GothamSemibold
+pcDropdownBtn.TextSize = 12
+pcDropdownBtn.Parent = pcTab
+Instance.new("UICorner", pcDropdownBtn).CornerRadius = UDim.new(0, 4)
+Instance.new("UIStroke", pcDropdownBtn).Color = Color3.fromRGB(60, 60, 70)
 
-local function refreshItemList()
-    for _, child in ipairs(itemScroll:GetChildren()) do
-        if child:IsA("TextButton") then child:Destroy() end
-    end
-    for _, item in ipairs(guiItems) do
-        if currentFilter == "All" or item.category == currentFilter then
+local pcScroll = Instance.new("ScrollingFrame")
+pcScroll.Size = UDim2.new(0.9, 0, 1, -55)
+pcScroll.Position = UDim2.new(0.05, 0, 0, 45)
+pcScroll.BackgroundTransparency = 1
+pcScroll.ScrollBarThickness = 4
+pcScroll.Parent = pcTab
+local pcLayout = Instance.new("UIListLayout", pcScroll)
+pcLayout.Padding = UDim.new(0, 4)
+
+local pcDropdownFrame = Instance.new("ScrollingFrame")
+pcDropdownFrame.Size = UDim2.new(0.9, 0, 0, 150)
+pcDropdownFrame.Position = UDim2.new(0.05, 0, 0, 45)
+pcDropdownFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+pcDropdownFrame.ScrollBarThickness = 4
+pcDropdownFrame.ZIndex = 10
+pcDropdownFrame.Visible = false
+pcDropdownFrame.Parent = pcTab
+Instance.new("UICorner", pcDropdownFrame)
+local pcDropLayout = Instance.new("UIListLayout", pcDropdownFrame)
+
+local currentPCFilter = "All"
+
+local function refreshPCList()
+    for _, child in ipairs(pcScroll:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
+    for _, item in ipairs(guiItemsPC) do
+        if currentPCFilter == "All" or item.category == currentPCFilter then
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.new(1, 0, 0, 30)
-            btn.BackgroundColor3 = TargetItems[item.name] and Color3.fromRGB(40, 160, 70) or Color3.fromRGB(35, 35, 40)
+            btn.BackgroundColor3 = TargetItemsPC[item.name] and Color3.fromRGB(40, 160, 70) or Color3.fromRGB(35, 35, 40)
             local starDisplay = string.rep("⭐", item.stars)
-            btn.Text = (TargetItems[item.name] and " ☑ " or " ☐ ") .. item.name .. " " .. starDisplay
+            btn.Text = (TargetItemsPC[item.name] and " ☑ " or " ☐ ") .. item.name .. " " .. starDisplay
             btn.TextXAlignment = Enum.TextXAlignment.Left
             btn.TextColor3 = Color3.fromRGB(255, 255, 255)
             btn.Font = Enum.Font.GothamMedium
             btn.TextSize = 12
-            btn.Parent = itemScroll
+            btn.Parent = pcScroll
             Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
             
             btn.MouseButton1Click:Connect(function()
-                if TargetItems[item.name] then
-                    TargetItems[item.name] = nil
+                if TargetItemsPC[item.name] then
+                    TargetItemsPC[item.name] = nil
                     btn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
                     btn.Text = " ☐ " .. item.name .. " " .. starDisplay
                 else
-                    TargetItems[item.name] = true
+                    TargetItemsPC[item.name] = true
                     btn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
                     btn.Text = " ☑ " .. item.name .. " " .. starDisplay
-                    
-                    -- INSTANT SNIPE CHECK kapag dinagdag sa listahan habang ON ang master switch
-                    if MasterAutoBuy then
-                        task.spawn(function()
-                            pcall(function()
-                                if StockServiceModule and ShopPurchaseRemote then
-                                    local shopId = (item.category == "Grocery") and "Grocery" or "PcParts"
-                                    local currentStock = StockServiceModule:GetAll(shopId)
-                                    if type(currentStock) == "table" and type(currentStock[item.name]) == "number" and currentStock[item.name] > 0 then
-                                        print("[INSTANT SNIPE] Newly targeted item bought! " .. item.name)
-                                        ShopPurchaseRemote:FireServer(shopId, item.name, currentStock[item.name])
-                                    end
-                                end
-                            end)
-                        end)
-                    end
+                    if MasterPC then triggerInstantSnipe("PcParts", {[item.name] = true}) end
                 end
             end)
         end
     end
     task.wait(0.1)
-    itemScroll.CanvasSize = UDim2.new(0, 0, 0, itemLayout.AbsoluteContentSize.Y + 10)
+    pcScroll.CanvasSize = UDim2.new(0, 0, 0, pcLayout.AbsoluteContentSize.Y + 10)
 end
 
-for cat, _ in pairs(categories) do
+for cat, _ in pairs(pcCategories) do
     local choiceBtn = Instance.new("TextButton")
     choiceBtn.Size = UDim2.new(1, 0, 0, 30)
     choiceBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
@@ -328,19 +399,70 @@ for cat, _ in pairs(categories) do
     choiceBtn.Font = Enum.Font.GothamMedium
     choiceBtn.TextSize = 12
     choiceBtn.ZIndex = 11
-    choiceBtn.Parent = dropdownFrame
+    choiceBtn.Parent = pcDropdownFrame
     
     choiceBtn.MouseButton1Click:Connect(function()
-        currentFilter = cat
-        dropdownBtn.Text = "Category: " .. string.upper(cat) .. " ▼"
-        dropdownFrame.Visible = false
-        refreshItemList()
+        currentPCFilter = cat
+        pcDropdownBtn.Text = "Category: " .. string.upper(cat) .. " ▼"
+        pcDropdownFrame.Visible = false
+        refreshPCList()
     end)
 end
-dropdownFrame.CanvasSize = UDim2.new(0, 0, 0, dropLayout.AbsoluteContentSize.Y)
+pcDropdownFrame.CanvasSize = UDim2.new(0, 0, 0, pcDropLayout.AbsoluteContentSize.Y)
+pcDropdownBtn.MouseButton1Click:Connect(function() pcDropdownFrame.Visible = not pcDropdownFrame.Visible end)
+refreshPCList()
 
-dropdownBtn.MouseButton1Click:Connect(function() dropdownFrame.Visible = not dropdownFrame.Visible end)
-refreshItemList()
+-- ==========================================
+-- 🍎 GROCERY TAB CONTENT
+-- ==========================================
+local groceryHeader = Instance.new("TextLabel")
+groceryHeader.Size = UDim2.new(0.9, 0, 0, 30)
+groceryHeader.Position = UDim2.new(0.05, 0, 0, 10)
+groceryHeader.BackgroundTransparency = 1
+groceryHeader.TextColor3 = Color3.fromRGB(255, 255, 255)
+groceryHeader.Text = "Grocery & Food Selector"
+groceryHeader.Font = Enum.Font.GothamBold
+groceryHeader.TextSize = 14
+groceryHeader.Parent = groceryTab
+
+local grocScroll = Instance.new("ScrollingFrame")
+grocScroll.Size = UDim2.new(0.9, 0, 1, -55)
+grocScroll.Position = UDim2.new(0.05, 0, 0, 45)
+grocScroll.BackgroundTransparency = 1
+grocScroll.ScrollBarThickness = 4
+grocScroll.Parent = groceryTab
+local grocLayout = Instance.new("UIListLayout", grocScroll)
+grocLayout.Padding = UDim.new(0, 4)
+
+for _, item in ipairs(guiItemsGrocery) do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 30)
+    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+    btn.Text = " ☐ " .. item.name
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamMedium
+    btn.TextSize = 12
+    btn.Parent = grocScroll
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+    
+    btn.MouseButton1Click:Connect(function()
+        if TargetItemsGrocery[item.name] then
+            TargetItemsGrocery[item.name] = nil
+            btn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+            btn.Text = " ☐ " .. item.name
+        else
+            TargetItemsGrocery[item.name] = true
+            btn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+            btn.Text = " ☑ " .. item.name
+            if MasterGrocery then triggerInstantSnipe("Grocery", {[item.name] = true}) end
+        end
+    end)
+end
+task.spawn(function()
+    task.wait(0.2)
+    grocScroll.CanvasSize = UDim2.new(0, 0, 0, grocLayout.AbsoluteContentSize.Y + 10)
+end)
 
 -- ==========================================
 -- ⚙️ SETTINGS TAB CONTENT
@@ -407,22 +529,32 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
         for itemName, quantity in pairs(stockTable) do
             if type(quantity) == "number" and quantity > 0 then
                 
-                -- AUTO BUY SNIPER
-                if TargetItems[itemName] then
-                    if MasterAutoBuy then
+                local itemData = (ShopConfig and ShopConfig.Items and ShopConfig.Items[itemName]) or {}
+                local category = itemData.Category or "Others"
+                local isGrocery = (category == "Grocery")
+                
+                -- SPLIT AUTO BUY LOGIC
+                local isTargeted = false
+                if isGrocery and TargetItemsGrocery[itemName] then
+                    isTargeted = true
+                    if MasterGrocery then
+                        mentionEveryone = true
+                        pcall(function() if ShopPurchaseRemote then ShopPurchaseRemote:FireServer(shopId, itemName, quantity) end end)
+                    end
+                elseif not isGrocery and TargetItemsPC[itemName] then
+                    isTargeted = true
+                    if MasterPC then
                         mentionEveryone = true
                         pcall(function() if ShopPurchaseRemote then ShopPurchaseRemote:FireServer(shopId, itemName, quantity) end end)
                     end
                 end
                 
-                local itemData = (ShopConfig and ShopConfig.Items and ShopConfig.Items[itemName]) or {}
-                local category = itemData.Category or "Others"
                 local itemObj = {
                     name = tostring(itemName), quantity = quantity, price = itemData.Price or 0,
-                    perHour = itemData.PerHour or 0, stars = itemData.Stars or 0, isTarget = TargetItems[itemName] or false
+                    perHour = itemData.PerHour or 0, stars = itemData.Stars or 0, isTarget = isTargeted
                 }
                 
-                if category == "Grocery" then table.insert(groceryFood, itemObj) else table.insert(pcParts, itemObj) end
+                if isGrocery then table.insert(groceryFood, itemObj) else table.insert(pcParts, itemObj) end
             end
         end
     end
@@ -432,14 +564,14 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
     end)
     table.sort(groceryFood, function(a, b) return a.price < b.price end)
     
-    local function buildEmbeds(itemList, isGrocery)
+    local function buildEmbeds(itemList, isGroceryCheck)
         local currentFields = {}
         local fieldCount = 0
         local function packEmbed()
             if #currentFields > 0 then
                 table.insert(embedsArray, {
-                    title = isGrocery and ("🛒 " .. tostring(shopId) .. " - FOOD") or ("📦 " .. tostring(shopId) .. " - PC PARTS"),
-                    color = isGrocery and 16753920 or 65280, fields = currentFields
+                    title = isGroceryCheck and ("🛒 " .. tostring(shopId) .. " - FOOD") or ("📦 " .. tostring(shopId) .. " - PC PARTS"),
+                    color = isGroceryCheck and 16753920 or 65280, fields = currentFields
                 })
                 currentFields = {}
                 fieldCount = 0
@@ -451,7 +583,7 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
             local displayName = item.isTarget and ("🎯 **" .. safeName:sub(1, 240) .. "**") or ("🔹 " .. safeName:sub(1, 250))
             
             local statsDesc
-            if isGrocery then
+            if isGroceryCheck then
                 statsDesc = string.format("📦 **Stock:** %d\n💵 **Price:** %s\n\u{200B}", item.quantity, tostring(item.price))
             else
                 local starDisplay = string.rep("⭐", item.stars)
@@ -473,16 +605,19 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
     local nextRestockUnix = currentUnix + 3600 
     if StockServiceModule then pcall(function() nextRestockUnix = math.floor(currentUnix + StockServiceModule:TimeUntilRestock(shopId)) end) end
     
+    local pcStatus = MasterPC and "🟢 ON" or "🔴 OFF"
+    local grocStatus = MasterGrocery and "🟢 ON" or "🔴 OFF"
+    
     table.insert(embedsArray, {
         title = "⏱️ Info",
         color = 3447003,
-        description = string.format("🔴 **Next Restock:** <t:%d:t> (<t:%d:R>)\n⚙️ **Sniper:** %s", nextRestockUnix, nextRestockUnix, MasterAutoBuy and "🟢 ACTIVE" or "🔴 OFF"),
+        description = string.format("🔴 **Next Restock:** <t:%d:t> (<t:%d:R>)\n⚙️ **PC:** %s | **Grocery:** %s", nextRestockUnix, nextRestockUnix, pcStatus, grocStatus),
         footer = { text = "Truff Hub" }, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
     })
     
     local restockPayload = { username = "Truff Hub", embeds = embedsArray }
-    if mentionEveryone and MasterAutoBuy then restockPayload.content = "@everyone 🚨 **TARGET ITEM DETECTED & SNIPED!**" end
+    if mentionEveryone then restockPayload.content = "@everyone 🚨 **TARGET ITEM DETECTED & SNIPED!**" end
     sendWebhook(restockPayload)
 end)
 
-sendWebhook({username = "Truff Hub", embeds = {{title = "HETO NA ANG INIWAN", description = "Truff Hub is Online. Master Auto-Buy is OFF.", color = 3447003}}})
+sendWebhook({username = "Truff Hub", embeds = {{title = "HETO NA ANG INIWAN", description = "Truff Hub is Online. Toggles are OFF by default.", color = 3447003}}})
