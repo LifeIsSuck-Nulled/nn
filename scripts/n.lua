@@ -171,7 +171,7 @@ local function triggerInstantSnipe(shopId, targetDict)
 end
 
 -- ==========================================
--- AUTO APPOINT LOOP (WITH TP & AUTO-OPEN)
+-- AUTO APPOINT LOOP (IMPROVED TP & OPEN)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -193,20 +193,30 @@ task.spawn(function()
                             local a = obj.ActionText:lower()
                             local pName = obj.Parent and obj.Parent.Name:lower() or ""
                             
-                            -- Hahanapin yung object na related sa laptop o server
                             if n:match("laptop") or n:match("server") or o:match("laptop") or o:match("server") or pName:match("laptop") then
                                 local part = obj.Parent
                                 if part and part:IsA("BasePart") then
-                                    -- Teleport sa mismong harap ng laptop
-                                    hrp.CFrame = part.CFrame + Vector3.new(0, 0, 3)
-                                    task.wait(0.3)
                                     
-                                    -- I-trigger yung E button (ProximityPrompt)
+                                    -- Teleport nang maayos sa harap ng laptop
+                                    hrp.CFrame = part.CFrame * CFrame.new(0, 0, 2)
+                                    task.wait(0.5) -- Bigyan ng time mag register sa server
+                                    
+                                    -- I-trigger yung E button nang bulletproof
                                     if fireproximityprompt then
-                                        fireproximityprompt(obj, 1)
-                                        fireproximityprompt(obj, 0)
+                                        local oldLOS = obj.RequiresLineOfSight
+                                        local oldMax = obj.MaxActivationDistance
+                                        
+                                        -- Force bypass line of sight at i-max ang range
+                                        obj.RequiresLineOfSight = false
+                                        obj.MaxActivationDistance = 50 
+                                        
+                                        fireproximityprompt(obj)
+                                        
+                                        task.wait(0.2)
+                                        obj.RequiresLineOfSight = oldLOS
+                                        obj.MaxActivationDistance = oldMax
                                     end
-                                    task.wait(0.5) -- Bigyan ng time mag-load yung UI
+                                    task.wait(1) -- Hintaying bumukas yung UI sa screen
                                     break
                                 end
                             end
@@ -214,7 +224,7 @@ task.spawn(function()
                     end
                 end
                 
-                -- Ngayon na bukas na ang laptop, patakbuhin yung Auto-Assign
+                -- Kapag bukas na ang UI, assign na ng NPC
                 if serverFrame and serverFrame.Visible then
                     local pcList = serverFrame:FindFirstChild("PcList")
                     if pcList then
