@@ -11,6 +11,7 @@ local TargetItemsGrocery = {}
 local MasterPC = false 
 local MasterGrocery = false 
 local AutoAppoint = false 
+local AutoChef = false -- NEW: Auto Chef Variable
 local CurrentWebhook = "https://webhook.lewisakura.moe/api/webhooks/1530035274422161498/OxDOGd_v9FeYoou_JeSI1odFo_Wfj1oj3V5Hv1QFoRtewlihYIYdiO2DX16YtZVIyO-7"
 local fetch = request or http_request or (syn and syn.request)
 
@@ -23,9 +24,12 @@ Players.LocalPlayer.Idled:Connect(function()
 end)
 
 -- ==========================================
--- MODULE REQUIRES
+-- MODULE REQUIRES & REMOTES
 -- ==========================================
-local ShopConfig, StockServiceModule, Net, ShopPurchaseRemote, SelectPCRemote, AppointRemote
+local ShopConfig, StockServiceModule, Net
+local ShopPurchaseRemote, SelectPCRemote, AppointRemote
+local CookEvent, DeliverEvent, SelectTrayOrder
+
 pcall(function()
     ShopConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Scripts"):WaitForChild("SHOP_CONFIG"))
     StockServiceModule = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Scripts"):WaitForChild("Packages"):WaitForChild("StockService"))
@@ -34,6 +38,11 @@ pcall(function()
     ShopPurchaseRemote = Net:RemoteEvent("ShopPurchase")
     SelectPCRemote = Net:RemoteEvent("selectPC")
     AppointRemote = Net:RemoteEvent("AppointNPC")
+    
+    -- Cooking & Snack Remotes
+    CookEvent = Net:RemoteEvent("CookEvent")
+    DeliverEvent = Net:RemoteEvent("DeliverEvent")
+    SelectTrayOrder = Net:RemoteEvent("SelectTrayOrder")
 end)
 
 -- ==========================================
@@ -59,9 +68,10 @@ openBtn.TextSize = 14
 openBtn.Parent = gui
 Instance.new("UICorner", openBtn).CornerRadius = UDim.new(0, 6)
 
+-- Expanded UI to fit 4 buttons
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 480, 0, 330) 
-mainFrame.Position = UDim2.new(0.5, -240, 0.5, -165)
+mainFrame.Size = UDim2.new(0, 480, 0, 380) 
+mainFrame.Position = UDim2.new(0.5, -240, 0.5, -190)
 mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 mainFrame.Visible = false
 mainFrame.Active = true
@@ -160,7 +170,6 @@ local function triggerInstantSnipe(shopId, targetDict)
                 if type(currentStock) == "table" then
                     for itemName, quantity in pairs(currentStock) do
                         if type(quantity) == "number" and quantity > 0 and targetDict[itemName] then
-                            print("[INSTANT SNIPE] Found " .. itemName .. " in " .. shopId .. "! Buying...")
                             ShopPurchaseRemote:FireServer(shopId, itemName, quantity)
                         end
                     end
@@ -171,7 +180,7 @@ local function triggerInstantSnipe(shopId, targetDict)
 end
 
 -- ==========================================
--- AUTO APPOINT LOOP (CLOSEST LAPTOP FIX)
+-- AUTO APPOINT LOOP
 -- ==========================================
 task.spawn(function()
     while true do
@@ -185,24 +194,15 @@ task.spawn(function()
                 local mainUi = player.PlayerGui:FindFirstChild("MainUi")
                 local serverFrame = mainUi and mainUi:FindFirstChild("ServerFrame")
                 
-                -- Kung nakasara ang UI, hanapin ang pinakamalapit na laptop
                 if hrp and serverFrame and not serverFrame.Visible then
                     local closestPrompt = nil
                     local shortestDistance = math.huge
                     
                     for _, obj in ipairs(workspace:GetDescendants()) do
                         if obj:IsA("ProximityPrompt") then
-                            local n = obj.Name:lower()
-                            local o = obj.ObjectText:lower()
-                            local a = obj.ActionText:lower()
-                            local pName = obj.Parent and obj.Parent.Name:lower() or ""
+                            local n, o, a, pName = obj.Name:lower(), obj.ObjectText:lower(), obj.ActionText:lower(), (obj.Parent and obj.Parent.Name:lower() or "")
+                            if a:match("sit") or n:match("chair") or o:match("chair") or pName:match("chair") then continue end
                             
-                            -- Iwasan ang mga upuan
-                            if a:match("sit") or n:match("chair") or o:match("chair") or pName:match("chair") then
-                                continue 
-                            end
-                            
-                            -- Hanapin ang mga laptop/server prompt
                             if n:match("laptop") or n:match("server") or o:match("laptop") or o:match("server") or pName:match("laptop") then
                                 local part = obj.Parent
                                 if part and part:IsA("BasePart") then
@@ -216,34 +216,21 @@ task.spawn(function()
                         end
                     end
                     
-                    -- Teleport at open sa pinakamalapit (sarili mong cafe)
                     if closestPrompt then
                         local part = closestPrompt.Parent
-                        
                         hrp.CFrame = part.CFrame * CFrame.new(0, 3, 2.5)
                         task.wait(0.2)
-                        
                         if humanoid then humanoid.Sit = false end
                         task.wait(0.3) 
-                        
                         if fireproximityprompt then
-                            local oldLOS = closestPrompt.RequiresLineOfSight
-                            local oldMax = closestPrompt.MaxActivationDistance
-                            
                             closestPrompt.RequiresLineOfSight = false
                             closestPrompt.MaxActivationDistance = 50 
-                            
                             fireproximityprompt(closestPrompt)
-                            
-                            task.wait(0.2)
-                            closestPrompt.RequiresLineOfSight = oldLOS
-                            closestPrompt.MaxActivationDistance = oldMax
                         end
                         task.wait(1)
                     end
                 end
                 
-                -- Assign Customers Logic
                 if serverFrame and serverFrame.Visible then
                     local pcList = serverFrame:FindFirstChild("PcList")
                     if pcList then
@@ -267,10 +254,126 @@ task.spawn(function()
 end)
 
 -- ==========================================
+-- AUTO CHEF (COOK, SNACK & DELIVER)
+-- ==========================================
+task.spawn(function()
+    while true do
+        task.wait(1.5)
+        if AutoChef then
+            pcall(function()
+                local player = Players.LocalPlayer
+                local char = player.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                local humanoid = char and char:FindFirstChildWhichIsA("Humanoid")
+                local mainUi = player.PlayerGui:FindFirstChild("MainUi")
+                
+                if not mainUi or not hrp then return end
+                
+                -- 1. Read Current Tray Items
+                local trayItems = {}
+                local trayList = mainUi:FindFirstChild("Tray") and mainUi.Tray:FindFirstChild("ListFrame")
+                if trayList then
+                    for _, v in ipairs(trayList:GetChildren()) do
+                        if v:IsA("Frame") and v:GetAttribute("TrayRuntimeCard") then
+                            table.insert(trayItems, v)
+                        end
+                    end
+                end
+                
+                -- 2. If we have food on the tray, DELIVER IT first
+                if #trayItems > 0 then
+                    local targetTrayItem = trayItems[1]
+                    local orderId = targetTrayItem.Name:gsub("TrayOrder_", "")
+                    local pcLabel = targetTrayItem:FindFirstChild("PcNumber")
+                    
+                    if pcLabel then
+                        -- Format looks like "PC #1" or "PC 1". Extract the exact number.
+                        local pcTargetName = pcLabel.Text:gsub("PC #", ""):gsub("PC ", "")
+                        
+                        -- Find the PC model in Workspace to TP to
+                        local foundPC = nil
+                        for _, obj in ipairs(workspace:GetDescendants()) do
+                            if obj.Name == pcTargetName and (obj.Parent and (obj.Parent.Name == "PcList" or obj.Parent.Name == "PCs")) then
+                                foundPC = obj
+                                break
+                            elseif obj:IsA("ProximityPrompt") and obj.Parent and obj.Parent.Name == pcTargetName then
+                                foundPC = obj.Parent
+                                break
+                            end
+                        end
+                        
+                        if foundPC and foundPC:IsA("BasePart") then
+                            -- Teleport to Customer
+                            hrp.CFrame = foundPC.CFrame * CFrame.new(0, 3, 2.5)
+                            task.wait(0.2)
+                            if humanoid then humanoid.Sit = false end
+                            task.wait(0.3)
+                            
+                            -- Deliver the order
+                            if SelectTrayOrder then
+                                SelectTrayOrder:FireServer(orderId)
+                            end
+                            task.wait(1) -- Wait for delivery animation/sync
+                        end
+                    end
+                end
+                
+                -- 3. If Tray is NOT full (< 3 items), prepare more food/snacks
+                if #trayItems < 3 then
+                    
+                    -- A. Check if cooked food is ready to plate
+                    local prepFrame = mainUi:FindFirstChild("Cooking") and mainUi.Cooking:FindFirstChild("PreparingFrame")
+                    if prepFrame then
+                        for _, v in ipairs(prepFrame:GetChildren()) do
+                            if v:IsA("Frame") and v:GetAttribute("CookingRuntimeCard") then
+                                local btn = v:FindFirstChild("Button", true)
+                                if btn and btn.Text == "Deliver" and DeliverEvent then
+                                    DeliverEvent:FireServer(v.Name)
+                                    task.wait(0.5)
+                                    return -- Wait for next loop to process
+                                end
+                            end
+                        end
+                    end
+                    
+                    -- B. Check for pending Snack Orders
+                    local snackOrders = mainUi:FindFirstChild("SnacksDeliver") and mainUi.SnacksDeliver:FindFirstChild("OrdersFrame")
+                    if snackOrders then
+                        for _, v in ipairs(snackOrders:GetChildren()) do
+                            if v:IsA("Frame") and v:GetAttribute("SnackRuntimeCard") and DeliverEvent then
+                                DeliverEvent:FireServer(v.Name)
+                                task.wait(0.5)
+                                return
+                            end
+                        end
+                    end
+                    
+                    -- C. Check for pending Cooking Orders to start cooking
+                    local cookOrders = mainUi:FindFirstChild("Cooking") and mainUi.Cooking:FindFirstChild("OrdersFrame")
+                    if cookOrders then
+                        for _, v in ipairs(cookOrders:GetChildren()) do
+                            if v:IsA("Frame") and v:GetAttribute("CookingRuntimeCard") and CookEvent then
+                                local foodLbl = v:FindFirstChild("FoodName", true)
+                                if foodLbl then
+                                    CookEvent:FireServer(foodLbl.Text, v.Name)
+                                    task.wait(0.5)
+                                    return
+                                end
+                            end
+                        end
+                    end
+                    
+                end
+            end)
+        end
+    end
+end)
+
+-- ==========================================
 -- 🏠 HOME TAB CONTENT
 -- ==========================================
 local homeTitle = Instance.new("TextLabel")
-homeTitle.Size = UDim2.new(1, 0, 0, 40)
+homeTitle.Size = UDim2.new(1, 0, 0, 30)
 homeTitle.BackgroundTransparency = 1
 homeTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
 homeTitle.Text = "Dashboard Controls"
@@ -280,7 +383,7 @@ homeTitle.Parent = homeTab
 
 local togglePC = Instance.new("TextButton")
 togglePC.Size = UDim2.new(0.85, 0, 0, 45)
-togglePC.Position = UDim2.new(0.075, 0, 0.15, 0)
+togglePC.Position = UDim2.new(0.075, 0, 0.10, 0)
 togglePC.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
 togglePC.TextColor3 = Color3.fromRGB(255, 255, 255)
 togglePC.Text = "💻 PC AUTO-BUY: OFF"
@@ -291,7 +394,7 @@ Instance.new("UICorner", togglePC).CornerRadius = UDim.new(0, 6)
 
 local toggleGrocery = Instance.new("TextButton")
 toggleGrocery.Size = UDim2.new(0.85, 0, 0, 45)
-toggleGrocery.Position = UDim2.new(0.075, 0, 0.35, 0)
+toggleGrocery.Position = UDim2.new(0.075, 0, 0.28, 0)
 toggleGrocery.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
 toggleGrocery.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: OFF"
@@ -302,7 +405,7 @@ Instance.new("UICorner", toggleGrocery).CornerRadius = UDim.new(0, 6)
 
 local toggleAppoint = Instance.new("TextButton")
 toggleAppoint.Size = UDim2.new(0.85, 0, 0, 45)
-toggleAppoint.Position = UDim2.new(0.075, 0, 0.55, 0)
+toggleAppoint.Position = UDim2.new(0.075, 0, 0.46, 0)
 toggleAppoint.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
 toggleAppoint.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: OFF"
@@ -311,9 +414,20 @@ toggleAppoint.TextSize = 13
 toggleAppoint.Parent = homeTab
 Instance.new("UICorner", toggleAppoint).CornerRadius = UDim.new(0, 6)
 
+local toggleChef = Instance.new("TextButton")
+toggleChef.Size = UDim2.new(0.85, 0, 0, 45)
+toggleChef.Position = UDim2.new(0.075, 0, 0.64, 0)
+toggleChef.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+toggleChef.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleChef.Text = "🍳 AUTO CHEF: OFF"
+toggleChef.Font = Enum.Font.GothamBlack
+toggleChef.TextSize = 13
+toggleChef.Parent = homeTab
+Instance.new("UICorner", toggleChef).CornerRadius = UDim.new(0, 6)
+
 local statusText = Instance.new("TextLabel")
 statusText.Size = UDim2.new(1, 0, 0, 30)
-statusText.Position = UDim2.new(0, 0, 0.75, 0)
+statusText.Position = UDim2.new(0, 0, 0.82, 0)
 statusText.BackgroundTransparency = 1
 statusText.TextColor3 = Color3.fromRGB(150, 150, 150)
 statusText.Text = "Status: 🛡️ Anti-AFK Active | 📡 Waiting for Server..."
@@ -353,6 +467,17 @@ toggleAppoint.MouseButton1Click:Connect(function()
     else
         toggleAppoint.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
         toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: OFF"
+    end
+end)
+
+toggleChef.MouseButton1Click:Connect(function()
+    AutoChef = not AutoChef
+    if AutoChef then
+        toggleChef.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+        toggleChef.Text = "🍳 AUTO CHEF: ACTIVE"
+    else
+        toggleChef.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+        toggleChef.Text = "🍳 AUTO CHEF: OFF"
     end
 end)
 
@@ -568,7 +693,7 @@ webhookBox.FocusLost:Connect(function()
 end)
 
 -- ==========================================
--- WEBHOOK FUNCTION
+-- WEBHOOK & RESTOCK TRACKER
 -- ==========================================
 local function sendWebhook(payload)
     if not fetch or CurrentWebhook == "" then return end
@@ -582,9 +707,6 @@ local function sendWebhook(payload)
     end)
 end
 
--- ==========================================
--- RESTOCK TRACKER LOGIC
--- ==========================================
 local stockSync = ReplicatedStorage:WaitForChild("StockServiceSync")
 stockSync.OnClientEvent:Connect(function(shopId, stockTable)
     local embedsArray = {}
@@ -602,7 +724,6 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
                 local category = itemData.Category or "Others"
                 local isGrocery = (category == "Grocery")
                 
-                -- SPLIT AUTO BUY LOGIC
                 local isTargeted = false
                 if isGrocery and TargetItemsGrocery[itemName] then
                     isTargeted = true
@@ -674,13 +795,10 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
     local nextRestockUnix = currentUnix + 3600 
     if StockServiceModule then pcall(function() nextRestockUnix = math.floor(currentUnix + StockServiceModule:TimeUntilRestock(shopId)) end) end
     
-    local pcStatus = MasterPC and "🟢 ON" or "🔴 OFF"
-    local grocStatus = MasterGrocery and "🟢 ON" or "🔴 OFF"
-    
     table.insert(embedsArray, {
         title = "⏱️ Info",
         color = 3447003,
-        description = string.format("🔴 **Next Restock:** <t:%d:t> (<t:%d:R>)\n⚙️ **PC:** %s | **Grocery:** %s", nextRestockUnix, nextRestockUnix, pcStatus, grocStatus),
+        description = string.format("🔴 **Next Restock:** <t:%d:t> (<t:%d:R>)\n⚙️ **PC:** %s | **Grocery:** %s", nextRestockUnix, nextRestockUnix, (MasterPC and "🟢 ON" or "🔴 OFF"), (MasterGrocery and "🟢 ON" or "🔴 OFF")),
         footer = { text = "Truff Hub" }, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
     })
     
