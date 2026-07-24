@@ -10,7 +10,7 @@ local TargetItemsPC = {}
 local TargetItemsGrocery = {}
 local MasterPC = false 
 local MasterGrocery = false 
-local AutoAppoint = false -- NEW: Auto Appoint Variable
+local AutoAppoint = false 
 local CurrentWebhook = "https://webhook.lewisakura.moe/api/webhooks/1530035274422161498/OxDOGd_v9FeYoou_JeSI1odFo_Wfj1oj3V5Hv1QFoRtewlihYIYdiO2DX16YtZVIyO-7"
 local fetch = request or http_request or (syn and syn.request)
 
@@ -59,7 +59,6 @@ openBtn.TextSize = 14
 openBtn.Parent = gui
 Instance.new("UICorner", openBtn).CornerRadius = UDim.new(0, 6)
 
--- Increased height to fit 3 buttons comfortably
 local mainFrame = Instance.new("Frame")
 mainFrame.Size = UDim2.new(0, 480, 0, 330) 
 mainFrame.Position = UDim2.new(0.5, -240, 0.5, -165)
@@ -172,23 +171,64 @@ local function triggerInstantSnipe(shopId, targetDict)
 end
 
 -- ==========================================
--- AUTO APPOINT LOOP
+-- AUTO APPOINT LOOP (WITH TP & AUTO-OPEN)
 -- ==========================================
 task.spawn(function()
     while true do
-        task.wait(1.5) -- Scans every 1.5 seconds
+        task.wait(1.5)
         if AutoAppoint then
             pcall(function()
-                local pcList = Players.LocalPlayer.PlayerGui.MainUi.ServerFrame.PcList
-                for _, pcFrame in ipairs(pcList:GetChildren()) do
-                    if not AutoAppoint then break end
-                    if pcFrame:IsA("Frame") then
-                        local pcName = pcFrame.Name
-                        if SelectPCRemote and AppointRemote then
-                            SelectPCRemote:FireServer(pcName)
-                            task.wait(0.05)
-                            AppointRemote:FireServer(pcName)
-                            task.wait(0.1) -- Small gap to prevent server spam kicking
+                local player = Players.LocalPlayer
+                local char = player.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                local mainUi = player.PlayerGui:FindFirstChild("MainUi")
+                local serverFrame = mainUi and mainUi:FindFirstChild("ServerFrame")
+                
+                -- Check if laptop UI is closed. If closed, find laptop, TP, and open it.
+                if hrp and serverFrame and not serverFrame.Visible then
+                    for _, obj in ipairs(workspace:GetDescendants()) do
+                        if obj:IsA("ProximityPrompt") then
+                            local n = obj.Name:lower()
+                            local o = obj.ObjectText:lower()
+                            local a = obj.ActionText:lower()
+                            local pName = obj.Parent and obj.Parent.Name:lower() or ""
+                            
+                            -- Hahanapin yung object na related sa laptop o server
+                            if n:match("laptop") or n:match("server") or o:match("laptop") or o:match("server") or pName:match("laptop") then
+                                local part = obj.Parent
+                                if part and part:IsA("BasePart") then
+                                    -- Teleport sa mismong harap ng laptop
+                                    hrp.CFrame = part.CFrame + Vector3.new(0, 0, 3)
+                                    task.wait(0.3)
+                                    
+                                    -- I-trigger yung E button (ProximityPrompt)
+                                    if fireproximityprompt then
+                                        fireproximityprompt(obj, 1)
+                                        fireproximityprompt(obj, 0)
+                                    end
+                                    task.wait(0.5) -- Bigyan ng time mag-load yung UI
+                                    break
+                                end
+                            end
+                        end
+                    end
+                end
+                
+                -- Ngayon na bukas na ang laptop, patakbuhin yung Auto-Assign
+                if serverFrame and serverFrame.Visible then
+                    local pcList = serverFrame:FindFirstChild("PcList")
+                    if pcList then
+                        for _, pcFrame in ipairs(pcList:GetChildren()) do
+                            if not AutoAppoint then break end
+                            if pcFrame:IsA("Frame") then
+                                local pcName = pcFrame.Name
+                                if SelectPCRemote and AppointRemote then
+                                    SelectPCRemote:FireServer(pcName)
+                                    task.wait(0.05)
+                                    AppointRemote:FireServer(pcName)
+                                    task.wait(0.1)
+                                end
+                            end
                         end
                     end
                 end
