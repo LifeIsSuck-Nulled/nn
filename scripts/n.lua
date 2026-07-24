@@ -171,7 +171,7 @@ local function triggerInstantSnipe(shopId, targetDict)
 end
 
 -- ==========================================
--- AUTO APPOINT LOOP (IMPROVED TP & OPEN)
+-- AUTO APPOINT LOOP (ANTI-SIT PROTECTION)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -181,6 +181,7 @@ task.spawn(function()
                 local player = Players.LocalPlayer
                 local char = player.Character
                 local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                local humanoid = char and char:FindFirstChildWhichIsA("Humanoid")
                 local mainUi = player.PlayerGui:FindFirstChild("MainUi")
                 local serverFrame = mainUi and mainUi:FindFirstChild("ServerFrame")
                 
@@ -193,20 +194,30 @@ task.spawn(function()
                             local a = obj.ActionText:lower()
                             local pName = obj.Parent and obj.Parent.Name:lower() or ""
                             
+                            -- Iwasan ang upuan para hindi magkamali ng pindot
+                            if a:match("sit") or n:match("chair") or o:match("chair") or pName:match("chair") then
+                                continue 
+                            end
+                            
                             if n:match("laptop") or n:match("server") or o:match("laptop") or o:match("server") or pName:match("laptop") then
                                 local part = obj.Parent
                                 if part and part:IsA("BasePart") then
                                     
-                                    -- Teleport nang maayos sa harap ng laptop
-                                    hrp.CFrame = part.CFrame * CFrame.new(0, 0, 2)
-                                    task.wait(0.5) -- Bigyan ng time mag register sa server
+                                    -- Teleport nang mas mataas para hindi madikit sa seat part
+                                    hrp.CFrame = part.CFrame * CFrame.new(0, 3, 2.5)
+                                    task.wait(0.2)
+                                    
+                                    -- I-force tumayo ang character kung sakaling na-sit
+                                    if humanoid then 
+                                        humanoid.Sit = false 
+                                    end
+                                    task.wait(0.3) 
                                     
                                     -- I-trigger yung E button nang bulletproof
                                     if fireproximityprompt then
                                         local oldLOS = obj.RequiresLineOfSight
                                         local oldMax = obj.MaxActivationDistance
                                         
-                                        -- Force bypass line of sight at i-max ang range
                                         obj.RequiresLineOfSight = false
                                         obj.MaxActivationDistance = 50 
                                         
