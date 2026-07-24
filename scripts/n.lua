@@ -218,7 +218,6 @@ task.spawn(function()
                             local n, o, a, pName = obj.Name:lower(), obj.ObjectText:lower(), obj.ActionText:lower(), (obj.Parent and obj.Parent.Name:lower() or "")
                             if a:match("sit") or n:match("chair") or o:match("chair") or pName:match("chair") then continue end
                             
-                            -- Sa Cashier Desktop lang ang pag-appoint
                             if n:match("laptop") or n:match("server") or o:match("laptop") or o:match("server") or pName:match("laptop") then
                                 local part = obj.Parent
                                 if part and part:IsA("BasePart") then
@@ -244,7 +243,6 @@ task.spawn(function()
                             if obj:IsA("Model") and not Players:GetPlayerFromCharacter(obj) then
                                 local hum = obj:FindFirstChild("Humanoid")
                                 local root = obj:FindFirstChild("HumanoidRootPart") or obj.PrimaryPart
-                                -- Nakatayo dapat ang customer kung naghihintay sa counter
                                 if root and hum and not hum.Sit and (root.Position - laptopPos).Magnitude < 25 then
                                     hasCustomer = true
                                     break
@@ -291,7 +289,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO CHEF (FIXED DINING PC & NPC TARGETING)
+-- AUTO CHEF (TP SA LIKOD NG CUSTOMER)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -316,7 +314,7 @@ task.spawn(function()
                     end
                 end
                 
-                -- PHASE 1: DELIVERY LOGIC
+                -- DELIVER FOOD
                 if #trayItems > 0 then
                     local equippedItem = nil
                     local firstItem = trayItems[1]
@@ -347,7 +345,6 @@ task.spawn(function()
                             local foundPC = nil
                             local shortestDist = 400 
                             
-                            -- Hahanapin yung PC table sa cafe. Posibleng PC1, Desk1, Table1
                             local validPrefixes = {"pc", "desk", "table", "computer"}
                             
                             for _, obj in ipairs(workspace:GetDescendants()) do
@@ -396,7 +393,6 @@ task.spawn(function()
                                 local targetNPC = nil
                                 local closestNPCDist = 15
                                 
-                                -- Hanapin yung NPC na malapit/nakaupo sa desk na yun
                                 for _, model in ipairs(workspace:GetDescendants()) do
                                     if model:IsA("Model") and model:FindFirstChild("Humanoid") and not Players:GetPlayerFromCharacter(model) then
                                         local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
@@ -410,10 +406,10 @@ task.spawn(function()
                                     end
                                 end
                                 
-                                -- Teleport Face-to-Face sa tao
+                                -- TELEPORT SA LIKOD NG TAO (+3.5 sa Z axis)
                                 if targetNPC then
                                     local npcRoot = targetNPC:FindFirstChild("HumanoidRootPart") or targetNPC.PrimaryPart
-                                    local targetPos = (npcRoot.CFrame * CFrame.new(0, 0, -3.5)).Position + Vector3.new(0, 2.5, 0)
+                                    local targetPos = (npcRoot.CFrame * CFrame.new(0, 0, 3.5)).Position + Vector3.new(0, 2.5, 0)
                                     hrp.CFrame = CFrame.lookAt(targetPos, npcRoot.Position)
                                 else
                                     hrp.CFrame = CFrame.new(pcPos) * CFrame.new(0, 3, -4)
@@ -423,7 +419,7 @@ task.spawn(function()
                                 if humanoid then humanoid.Sit = false end
                                 task.wait(0.3)
                                 
-                                -- I-serve ang pagkain (Pindutin ang mga "Give/Deliver" prompts)
+                                -- Pindutin ang mga "Give/Deliver" prompts
                                 if fireproximityprompt then
                                     for _, prompt in ipairs(workspace:GetDescendants()) do
                                         if prompt:IsA("ProximityPrompt") then
