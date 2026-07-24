@@ -45,9 +45,9 @@ pcall(function()
 end)
 
 -- ==========================================
--- TRUFF HUB UI SETUP
+-- UI SETUP (LABA BABY HUB)
 -- ==========================================
-local guiName = "TruffHubGUI"
+local guiName = "LabaBabyHubGUI"
 local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
 if playerGui:FindFirstChild(guiName) then playerGui[guiName]:Destroy() end
 
@@ -61,7 +61,7 @@ openBtn.Size = UDim2.new(0, 130, 0, 40)
 openBtn.Position = UDim2.new(0, 10, 0, 10)
 openBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
 openBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-openBtn.Text = "LABA HUB"
+openBtn.Text = "🎯 Open Menu"
 openBtn.Font = Enum.Font.GothamBold
 openBtn.TextSize = 14
 openBtn.Parent = gui
@@ -93,7 +93,7 @@ openBtn.MouseButton1Click:Connect(function() mainFrame.Visible = true; openBtn.V
 closeBtn.MouseButton1Click:Connect(function() mainFrame.Visible = false; openBtn.Visible = true end)
 
 local sidebar = Instance.new("Frame")
-sidebar.Size = UDim2.new(0, 130, 1, 0)
+sidebar.Size = UDim2.new(0, 140, 1, 0)
 sidebar.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
 sidebar.Parent = mainFrame
 Instance.new("UICorner", sidebar).CornerRadius = UDim.new(0, 8)
@@ -102,14 +102,14 @@ local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1, 0, 0, 40)
 title.BackgroundTransparency = 1
 title.TextColor3 = Color3.fromRGB(255, 255, 255)
-title.Text = "TRUFF HUB"
+title.Text = "LABA BABY HUB"
 title.Font = Enum.Font.GothamBlack
-title.TextSize = 16
+title.TextSize = 14
 title.Parent = sidebar
 
 local contentFrame = Instance.new("Frame")
-contentFrame.Size = UDim2.new(1, -130, 1, 0)
-contentFrame.Position = UDim2.new(0, 130, 0, 0)
+contentFrame.Size = UDim2.new(1, -140, 1, 0)
+contentFrame.Position = UDim2.new(0, 140, 0, 0)
 contentFrame.BackgroundTransparency = 1
 contentFrame.Parent = mainFrame
 
@@ -178,7 +178,7 @@ local function triggerInstantSnipe(shopId, targetDict)
 end
 
 -- ==========================================
--- AUTO APPOINT LOOP
+-- AUTO APPOINT LOOP (ONLY TP WHEN CUSTOMER IS WAITING)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -196,6 +196,7 @@ task.spawn(function()
                     local closestPrompt = nil
                     local shortestDistance = math.huge
                     
+                    -- Hanapin ang laptop
                     for _, obj in ipairs(workspace:GetDescendants()) do
                         if obj:IsA("ProximityPrompt") then
                             local n, o, a, pName = obj.Name:lower(), obj.ObjectText:lower(), obj.ActionText:lower(), (obj.Parent and obj.Parent.Name:lower() or "")
@@ -214,7 +215,29 @@ task.spawn(function()
                         end
                     end
                     
-                    if closestPrompt then
+                    -- CHECK KUNG MAY CUSTOMER NA NAGHIHINTAY
+                    local hasCustomer = false
+                    local npcInfo = serverFrame:FindFirstChild("NpcInfo")
+                    if npcInfo and npcInfo.Visible then
+                        hasCustomer = true
+                    end
+                    
+                    if closestPrompt and not hasCustomer then
+                        local laptopPos = closestPrompt.Parent.Position
+                        -- Maghanap ng NPC malapit sa laptop
+                        for _, obj in ipairs(workspace:GetChildren()) do
+                            if obj:IsA("Model") and obj:FindFirstChild("Humanoid") and not Players:GetPlayerFromCharacter(obj) then
+                                local root = obj:FindFirstChild("HumanoidRootPart") or obj.PrimaryPart
+                                if root and (root.Position - laptopPos).Magnitude < 15 then
+                                    hasCustomer = true
+                                    break
+                                end
+                            end
+                        end
+                    end
+                    
+                    -- TELEPORT LANG KUNG MAY CUSTOMER
+                    if closestPrompt and hasCustomer then
                         local part = closestPrompt.Parent
                         hrp.CFrame = part.CFrame * CFrame.new(0, 3, 2.5)
                         task.wait(0.2)
@@ -229,6 +252,7 @@ task.spawn(function()
                     end
                 end
                 
+                -- ASSIGN CUSTOMERS KUNG BUKAS NA ANG UI
                 if serverFrame and serverFrame.Visible then
                     local pcList = serverFrame:FindFirstChild("PcList")
                     if pcList then
@@ -252,7 +276,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO CHEF (FIXED TP & NUMBER CASTING)
+-- AUTO CHEF (UNIVERSAL PC SCANNER & AUTO-DELIVER)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -278,46 +302,66 @@ task.spawn(function()
                     end
                 end
                 
-                -- 2. DELIVER FOOD (Fixed PC Scanner & Teleport)
+                -- 2. DELIVER FOOD
                 if #trayItems > 0 then
                     local targetTrayItem = trayItems[1]
-                    
-                    -- Ligtas na kino-convert ang ID pabalik sa number para hindi ma-reject ng server
                     local rawId = targetTrayItem.Name:gsub("TrayOrder_", "")
                     local orderId = tonumber(rawId) or rawId 
                     
                     local pcLabel = targetTrayItem:FindFirstChild("PcNumber")
                     if pcLabel then
-                        local pcNumber = pcLabel.Text:match("%d+") -- Kinukuha lang yung number
+                        -- Ligtas na format conversion para siguradong mahanap ang desk
+                        local pcNameRaw = pcLabel.Text:upper():gsub("PC", ""):gsub("#", ""):gsub("%s+", "")
                         
-                        if pcNumber then
-                            local foundPart = nil
-                            local targetNames = {"PC" .. pcNumber, "PC " .. pcNumber, "Pc" .. pcNumber, "pc" .. pcNumber}
-                            
-                            -- Hahanapin ang PC Model o Part
-                            for _, obj in ipairs(workspace:GetDescendants()) do
-                                if table.find(targetNames, obj.Name) then
-                                    if obj:IsA("Model") then
-                                        foundPart = obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)
-                                        break
-                                    elseif obj:IsA("BasePart") then
-                                        foundPart = obj
-                                        break
+                        local foundPC = nil
+                        local shortestDist = 300 -- Radius ng sariling cafe lang
+                        
+                        -- Hahanapin ang PC gamit ang Universal Name Scanner
+                        for _, obj in ipairs(workspace:GetDescendants()) do
+                            local n = obj.Name:upper():gsub("PC", ""):gsub("#", ""):gsub("%s+", "")
+                            if n == pcNameRaw then
+                                if obj:IsA("Model") or obj:IsA("BasePart") then
+                                    local pos = obj:IsA("Model") and (obj.PrimaryPart and obj.PrimaryPart.Position or obj:GetModelCFrame().Position) or obj.Position
+                                    local dist = (hrp.Position - pos).Magnitude
+                                    if dist < shortestDist then
+                                        shortestDist = dist
+                                        foundPC = obj:IsA("Model") and (obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)) or obj
                                     end
                                 end
                             end
+                        end
+                        
+                        -- Kapag nahanap na yung desk, mag-TP at iserve ang pagkain
+                        if foundPC then
+                            hrp.CFrame = foundPC.CFrame * CFrame.new(0, 3, 3.5)
+                            task.wait(0.2)
+                            if humanoid then humanoid.Sit = false end
+                            task.wait(0.3)
                             
-                            -- Kung nakita yung PC, mag-teleport sa harap
-                            if foundPart then
-                                hrp.CFrame = foundPart.CFrame * CFrame.new(0, 3, 2.5)
-                                task.wait(0.2)
-                                if humanoid then humanoid.Sit = false end
-                                task.wait(0.3)
-                            end
-                            
-                            -- I-serve na yung pagkain!
+                            -- Piliin ang food sa tray mo
                             if SelectTrayOrder then
                                 SelectTrayOrder:FireServer(orderId)
+                            end
+                            task.wait(0.3)
+                            
+                            -- Pindutin agad ang lahat ng Deliver/Serve prompts malapit sayo!
+                            if fireproximityprompt then
+                                for _, prompt in ipairs(workspace:GetDescendants()) do
+                                    if prompt:IsA("ProximityPrompt") then
+                                        local part = prompt.Parent
+                                        if part and part:IsA("BasePart") then
+                                            if (part.Position - hrp.Position).Magnitude < 15 then
+                                                local a = prompt.ActionText:lower()
+                                                if not a:match("sit") then -- Wag upuan ang pindutin
+                                                    local oldLOS = prompt.RequiresLineOfSight
+                                                    prompt.RequiresLineOfSight = false
+                                                    fireproximityprompt(prompt)
+                                                    prompt.RequiresLineOfSight = oldLOS
+                                                end
+                                            end
+                                        end
+                                    end
+                                end
                             end
                             task.wait(1)
                         end
@@ -327,7 +371,6 @@ task.spawn(function()
                 -- 3. PREPARE MORE FOOD (< 3 tray items)
                 if #trayItems < 3 then
                     
-                    -- A. Check if cooked food is ready to plate
                     local prepFrame = mainUi:FindFirstChild("Cooking") and mainUi.Cooking:FindFirstChild("PreparingFrame")
                     if prepFrame then
                         for _, v in ipairs(prepFrame:GetChildren()) do
@@ -343,7 +386,6 @@ task.spawn(function()
                         end
                     end
                     
-                    -- B. Check for pending Snack Orders
                     local snackOrders = mainUi:FindFirstChild("SnacksDeliver") and mainUi.SnacksDeliver:FindFirstChild("OrdersFrame")
                     if snackOrders then
                         for _, v in ipairs(snackOrders:GetChildren()) do
@@ -356,7 +398,6 @@ task.spawn(function()
                         end
                     end
                     
-                    -- C. Check for pending Cooking Orders to start cooking
                     local cookOrders = mainUi:FindFirstChild("Cooking") and mainUi.Cooking:FindFirstChild("OrdersFrame")
                     if cookOrders then
                         for _, v in ipairs(cookOrders:GetChildren()) do
@@ -807,12 +848,12 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
         title = "⏱️ Info",
         color = 3447003,
         description = string.format("🔴 **Next Restock:** <t:%d:t> (<t:%d:R>)\n⚙️ **PC:** %s | **Grocery:** %s", nextRestockUnix, nextRestockUnix, (MasterPC and "🟢 ON" or "🔴 OFF"), (MasterGrocery and "🟢 ON" or "🔴 OFF")),
-        footer = { text = "Truff Hub" }, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+        footer = { text = "LABA BABY HUB" }, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
     })
     
-    local restockPayload = { username = "Truff Hub", embeds = embedsArray }
+    local restockPayload = { username = "Laba Baby Hub", embeds = embedsArray }
     if mentionEveryone then restockPayload.content = "@everyone 🚨 **TARGET ITEM DETECTED & SNIPED!**" end
     sendWebhook(restockPayload)
 end)
 
-sendWebhook({username = "Truff Hub", embeds = {{title = "HETO NA ANG INIWAN", description = "Truff Hub is Online. Toggles are OFF by default.", color = 3447003}}})
+sendWebhook({username = "Laba Baby Hub", embeds = {{title = "HETO NA ANG INIWAN", description = "Laba Baby Hub is Online. Toggles are OFF by default.", color = 3447003}}})
