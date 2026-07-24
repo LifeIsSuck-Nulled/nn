@@ -2,7 +2,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
-local CoreGui = game:GetService("CoreGui")
 
 -- Your exact webhook URL formatted to use the proxy
 local WEBHOOK_URL = "https://webhook.lewisakura.moe/api/webhooks/1530035274422161498/OxDOGd_v9FeYoou_JeSI1odFo_Wfj1oj3V5Hv1QFoRtewlihYIYdiO2DX16YtZVIyO-7"
@@ -41,16 +40,35 @@ pcall(function()
 end)
 
 -- ==========================================
--- MOBILE-FRIENDLY GUI SETUP
+-- MOBILE-FRIENDLY GUI SETUP (SAFE LOAD)
 -- ==========================================
 local guiName = "TruffAutoBuyGUI"
--- Clean up old GUI if re-executed
-if CoreGui:FindFirstChild(guiName) then CoreGui[guiName]:Destroy() end
-if Players.LocalPlayer.PlayerGui:FindFirstChild(guiName) then Players.LocalPlayer.PlayerGui[guiName]:Destroy() end
 
-local guiParent = (gethui and gethui()) or CoreGui
+-- Safely find a folder to put the GUI without triggering capability crashes
+local guiParent = nil
+pcall(function()
+    guiParent = gethui and gethui()
+end)
+
+if not guiParent then
+    guiParent = Players.LocalPlayer:WaitForChild("PlayerGui")
+end
+
+-- Clean up old GUI if re-executed
+pcall(function()
+    if guiParent:FindFirstChild(guiName) then
+        guiParent[guiName]:Destroy()
+    end
+end)
+pcall(function()
+    if Players.LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild(guiName) then
+        Players.LocalPlayer.PlayerGui[guiName]:Destroy()
+    end
+end)
+
 local gui = Instance.new("ScreenGui")
 gui.Name = guiName
+gui.ResetOnSpawn = false -- Keeps GUI on screen if you die
 gui.Parent = guiParent
 
 -- Toggle Button (To hide/show menu on mobile)
