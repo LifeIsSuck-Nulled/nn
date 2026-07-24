@@ -15,6 +15,10 @@ local AutoChef = false
 local CurrentWebhook = "https://webhook.lewisakura.moe/api/webhooks/1530035274422161498/OxDOGd_v9FeYoou_JeSI1odFo_Wfj1oj3V5Hv1QFoRtewlihYIYdiO2DX16YtZVIyO-7"
 local fetch = request or http_request or (syn and syn.request)
 
+-- CAFE MEMORY LOCK
+local MyHomeLaptop = nil
+local MyCafePos = nil
+
 -- Shop Coordinates para sa Auto-Buy TP
 local ShopCFrame = CFrame.new(-240.48721313476562, 7.888942718505859, 136.32080078125)
 
@@ -161,7 +165,7 @@ tabButtons["Home"].BackgroundColor3 = Color3.fromRGB(50, 50, 60)
 tabButtons["Home"].TextColor3 = Color3.fromRGB(255, 255, 255)
 
 -- ==========================================
--- INSTANT SNIPE FUNCTION (WITH TP)
+-- INSTANT SNIPE FUNCTION (WITH RETURN TP)
 -- ==========================================
 local function triggerInstantSnipe(shopId, targetDict)
     task.spawn(function()
@@ -179,12 +183,24 @@ local function triggerInstantSnipe(shopId, targetDict)
                     
                     if #itemsToBuy > 0 then
                         local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                        local returnCF = nil
+                        
+                        -- Save current position and go to shop
                         if hrp then
+                            returnCF = hrp.CFrame
                             hrp.CFrame = ShopCFrame
                             task.wait(0.3) 
                         end
+                        
+                        -- Buy items
                         for _, item in ipairs(itemsToBuy) do
                             ShopPurchaseRemote:FireServer(shopId, item.name, item.qty)
+                        end
+                        
+                        -- Return to base
+                        if hrp and returnCF then
+                            task.wait(0.3)
+                            hrp.CFrame = returnCF
                         end
                     end
                     
@@ -195,7 +211,7 @@ local function triggerInstantSnipe(shopId, targetDict)
 end
 
 -- ==========================================
--- AUTO APPOINT LOOP
+-- AUTO APPOINT LOOP (WITH BASE MEMORY)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -210,24 +226,36 @@ task.spawn(function()
                 local serverFrame = mainUi and mainUi:FindFirstChild("ServerFrame")
                 
                 if hrp and serverFrame and not serverFrame.Visible then
-                    local closestPrompt = nil
-                    local shortestDistance = math.huge
                     
-                    for _, obj in ipairs(workspace:GetDescendants()) do
-                        if obj:IsA("ProximityPrompt") then
-                            local n, o, a, pName = obj.Name:lower(), obj.ObjectText:lower(), obj.ActionText:lower(), (obj.Parent and obj.Parent.Name:lower() or "")
-                            if a:match("sit") or n:match("chair") or o:match("chair") or pName:match("chair") then continue end
-                            
-                            if n:match("laptop") or n:match("server") or o:match("laptop") or o:match("server") or pName:match("laptop") then
-                                local part = obj.Parent
-                                if part and part:IsA("BasePart") then
-                                    local dist = (hrp.Position - part.Position).Magnitude
-                                    if dist < shortestDistance then
-                                        shortestDistance = dist
-                                        closestPrompt = obj
+                    local closestPrompt = MyHomeLaptop
+                    
+                    -- Hanapin ang sariling laptop kung wala pa sa memory
+                    if not closestPrompt or not closestPrompt.Parent then
+                        local shortestDistance = math.huge
+                        
+                        for _, obj in ipairs(workspace:GetDescendants()) do
+                            if obj:IsA("ProximityPrompt") then
+                                local n, o, a, pName = obj.Name:lower(), obj.ObjectText:lower(), obj.ActionText:lower(), (obj.Parent and obj.Parent.Name:lower() or "")
+                                if a:match("sit") or n:match("chair") or o:match("chair") or pName:match("chair") then continue end
+                                
+                                if n:match("laptop") or n:match("server") or o:match("laptop") or o:match("server") or pName:match("laptop") then
+                                    local part = obj.Parent
+                                    if part and part:IsA("BasePart") then
+                                        local dist = (hrp.Position - part.Position).Magnitude
+                                        -- I-save lang kapag malapit sa player (nasa loob ng cafe)
+                                        if dist < shortestDistance and dist < 150 then
+                                            shortestDistance = dist
+                                            closestPrompt = obj
+                                        end
                                     end
                                 end
                             end
+                        end
+                        
+                        -- I-save sa memory para kahit pumunta ng shop, ito pa rin ang babalikan!
+                        if closestPrompt then
+                            MyHomeLaptop = closestPrompt
+                            MyCafePos = closestPrompt.Parent.Position
                         end
                     end
                     
@@ -258,9 +286,11 @@ task.spawn(function()
                         if humanoid then humanoid.Sit = false end
                         task.wait(0.3) 
                         if fireproximityprompt then
+                            local oldLOS = closestPrompt.RequiresLineOfSight
                             closestPrompt.RequiresLineOfSight = false
                             closestPrompt.MaxActivationDistance = 50 
                             fireproximityprompt(closestPrompt)
+                            closestPrompt.RequiresLineOfSight = oldLOS
                         end
                         task.wait(1)
                     end
@@ -289,7 +319,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO CHEF (TP SA LIKOD NG CUSTOMER)
+-- AUTO CHEF (WITH CAFE MEMORY LOCK)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -372,6 +402,13 @@ task.spawn(function()
                                         end
                                         
                                         if pos then
+                                            -- =====================================
+                                            -- MEMORY LOCK: WAG PAPANSININ KUNG NASA IBANG CAFE
+                                            -- =====================================
+                                            if MyCafePos and (pos - MyCafePos).Magnitude > 200 then
+                                                continue 
+                                            end
+                                            
                                             local dist = (hrp.Position - pos).Magnitude
                                             if dist < shortestDist then
                                                 shortestDist = dist
@@ -406,7 +443,6 @@ task.spawn(function()
                                     end
                                 end
                                 
-                                -- TELEPORT SA LIKOD NG TAO (+3.5 sa Z axis)
                                 if targetNPC then
                                     local npcRoot = targetNPC:FindFirstChild("HumanoidRootPart") or targetNPC.PrimaryPart
                                     local targetPos = (npcRoot.CFrame * CFrame.new(0, 0, 3.5)).Position + Vector3.new(0, 2.5, 0)
@@ -419,7 +455,6 @@ task.spawn(function()
                                 if humanoid then humanoid.Sit = false end
                                 task.wait(0.3)
                                 
-                                -- Pindutin ang mga "Give/Deliver" prompts
                                 if fireproximityprompt then
                                     for _, prompt in ipairs(workspace:GetDescendants()) do
                                         if prompt:IsA("ProximityPrompt") then
@@ -880,12 +915,23 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
     
     if #itemsToBuy > 0 then
         local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local returnCF = nil
+        
+        -- Mag-save ng current location at TP sa shop
         if hrp then
+            returnCF = hrp.CFrame
             hrp.CFrame = ShopCFrame
             task.wait(0.3) 
         end
+        
         for _, item in ipairs(itemsToBuy) do
             pcall(function() ShopPurchaseRemote:FireServer(item.id, item.name, item.qty) end)
+        end
+        
+        -- Ibalik sa sariling cafe
+        if hrp and returnCF then
+            task.wait(0.3)
+            hrp.CFrame = returnCF
         end
     end
     
