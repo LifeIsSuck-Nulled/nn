@@ -178,7 +178,7 @@ local function triggerInstantSnipe(shopId, targetDict)
 end
 
 -- ==========================================
--- AUTO APPOINT LOOP (ONLY TP WHEN CUSTOMER IS WAITING)
+-- AUTO APPOINT LOOP (BULLETPROOF NPC SCANNER)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -196,6 +196,7 @@ task.spawn(function()
                     local closestPrompt = nil
                     local shortestDistance = math.huge
                     
+                    -- Hanapin ang laptop
                     for _, obj in ipairs(workspace:GetDescendants()) do
                         if obj:IsA("ProximityPrompt") then
                             local n, o, a, pName = obj.Name:lower(), obj.ObjectText:lower(), obj.ActionText:lower(), (obj.Parent and obj.Parent.Name:lower() or "")
@@ -214,18 +215,14 @@ task.spawn(function()
                         end
                     end
                     
+                    -- CHECK KUNG MAY CUSTOMER (GAMIT ANG GETDESCENDANTS PARA SURE)
                     local hasCustomer = false
-                    local npcInfo = serverFrame:FindFirstChild("NpcInfo")
-                    if npcInfo and npcInfo.Visible then
-                        hasCustomer = true
-                    end
-                    
-                    if closestPrompt and not hasCustomer then
+                    if closestPrompt then
                         local laptopPos = closestPrompt.Parent.Position
-                        for _, obj in ipairs(workspace:GetChildren()) do
+                        for _, obj in ipairs(workspace:GetDescendants()) do
                             if obj:IsA("Model") and obj:FindFirstChild("Humanoid") and not Players:GetPlayerFromCharacter(obj) then
                                 local root = obj:FindFirstChild("HumanoidRootPart") or obj.PrimaryPart
-                                if root and (root.Position - laptopPos).Magnitude < 15 then
+                                if root and (root.Position - laptopPos).Magnitude < 25 then
                                     hasCustomer = true
                                     break
                                 end
@@ -233,6 +230,7 @@ task.spawn(function()
                         end
                     end
                     
+                    -- TELEPORT LANG KUNG MAY CUSTOMER NA NAGHIHINTAY
                     if closestPrompt and hasCustomer then
                         local part = closestPrompt.Parent
                         hrp.CFrame = part.CFrame * CFrame.new(0, 3, 2.5)
@@ -248,6 +246,7 @@ task.spawn(function()
                     end
                 end
                 
+                -- ASSIGN CUSTOMERS KUNG BUKAS NA ANG UI
                 if serverFrame and serverFrame.Visible then
                     local pcList = serverFrame:FindFirstChild("PcList")
                     if pcList then
@@ -271,7 +270,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO CHEF (TP EXACTLY TO NPC + HOLD ITEM BEFORE TP)
+-- AUTO CHEF (FACE-TO-FACE NPC DELIVERY)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -296,17 +295,17 @@ task.spawn(function()
                     end
                 end
                 
-                -- DELIVER FOOD (TO NPC FACE)
+                -- DELIVER FOOD (EXACTLY SA HARAP NG TAO)
                 if #trayItems > 0 then
                     local targetTrayItem = trayItems[1]
                     local rawId = targetTrayItem.Name:gsub("TrayOrder_", "")
                     local orderId = tonumber(rawId) or rawId 
                     
-                    -- FIX 1: HAWAKAN MUNA ANG PAGKAIN BAGO MAG TELEPORT!
+                    -- 1. HAWAKAN MUNA ANG PAGKAIN BAGO MAG-TP
                     if SelectTrayOrder then
                         SelectTrayOrder:FireServer(orderId)
                     end
-                    task.wait(0.3) -- Bigyan ng time lumitaw sa kamay
+                    task.wait(0.3) -- Hintaying ma-equip
                     
                     local pcLabel = targetTrayItem:FindFirstChild("PcNumber")
                     if pcLabel then
@@ -315,7 +314,7 @@ task.spawn(function()
                         local foundPC = nil
                         local shortestDist = 300 
                         
-                        -- Hanapin muna kung nasaan yung mismong PC desk
+                        -- 2. Hanapin ang PC desk
                         for _, obj in ipairs(workspace:GetDescendants()) do
                             local n = obj.Name:upper():gsub("PC", ""):gsub("#", ""):gsub("%s+", "")
                             if n == pcNameRaw then
@@ -333,11 +332,11 @@ task.spawn(function()
                         if foundPC then
                             local pcPos = foundPC:IsA("Model") and (foundPC.PrimaryPart and foundPC.PrimaryPart.Position or foundPC:GetModelCFrame().Position) or foundPC.Position
                             
-                            -- FIX 2: HANAPIN ANG MISMONG TAO (NPC) MALAPIT SA PC PARA DOON MAG TP
+                            -- 3. HANAPIN ANG MISMONG TAO NA NAKA-UPO SA PC
                             local targetNPC = nil
                             local closestNPCDist = 15
                             
-                            for _, obj in ipairs(workspace:GetChildren()) do
+                            for _, obj in ipairs(workspace:GetDescendants()) do
                                 if obj:IsA("Model") and obj:FindFirstChild("Humanoid") and not Players:GetPlayerFromCharacter(obj) then
                                     local root = obj:FindFirstChild("HumanoidRootPart") or obj.PrimaryPart
                                     if root then
@@ -350,13 +349,14 @@ task.spawn(function()
                                 end
                             end
                             
-                            -- Kung may nakitang tao, teleport sa HARAP niya (Face-to-Face)
+                            -- 4. TELEPORT SA MUKHA NG CUSTOMER
                             if targetNPC then
                                 local npcRoot = targetNPC:FindFirstChild("HumanoidRootPart") or targetNPC.PrimaryPart
-                                -- CFrame.lookAt(target pos, where to look) -> TP 3.5 studs in front of NPC
-                                hrp.CFrame = CFrame.lookAt((npcRoot.CFrame * CFrame.new(0, 0, -3.5)).Position, npcRoot.Position)
+                                -- Kalkulahin ang pwesto 3.5 studs sa harap niya at naka-angat nang konti
+                                local targetPos = (npcRoot.CFrame * CFrame.new(0, 0, -3.5)).Position + Vector3.new(0, 2.5, 0)
+                                hrp.CFrame = CFrame.lookAt(targetPos, npcRoot.Position)
                             else
-                                -- Kung sakaling naglalakad palang siya, sa malapit sa desk nalang mag TP
+                                -- Kung sakaling naglalakad palang siya
                                 local baseCF = foundPC:IsA("Model") and (foundPC.PrimaryPart and foundPC.PrimaryPart.CFrame or foundPC:GetModelCFrame()) or foundPC.CFrame
                                 hrp.CFrame = baseCF * CFrame.new(0, 3, -4)
                             end
@@ -365,7 +365,7 @@ task.spawn(function()
                             if humanoid then humanoid.Sit = false end
                             task.wait(0.3)
                             
-                            -- Pindutin agad ang lahat ng Serve/Give prompts!
+                            -- 5. I-SERVE ANG PAGKAIN (Pindutin ang Prompts)
                             if fireproximityprompt then
                                 for _, prompt in ipairs(workspace:GetDescendants()) do
                                     if prompt:IsA("ProximityPrompt") then
