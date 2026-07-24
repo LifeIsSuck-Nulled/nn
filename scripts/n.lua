@@ -40,36 +40,21 @@ pcall(function()
 end)
 
 -- ==========================================
--- MOBILE-FRIENDLY GUI SETUP (SAFE LOAD)
+-- MOBILE-FRIENDLY GUI SETUP (100% SAFE LOAD)
 -- ==========================================
 local guiName = "TruffAutoBuyGUI"
+local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
 
--- Safely find a folder to put the GUI without triggering capability crashes
-local guiParent = nil
-pcall(function()
-    guiParent = gethui and gethui()
-end)
-
-if not guiParent then
-    guiParent = Players.LocalPlayer:WaitForChild("PlayerGui")
+-- Clean up old GUI if you re-execute the script
+local oldGui = playerGui:FindFirstChild(guiName)
+if oldGui then
+    oldGui:Destroy()
 end
-
--- Clean up old GUI if re-executed
-pcall(function()
-    if guiParent:FindFirstChild(guiName) then
-        guiParent[guiName]:Destroy()
-    end
-end)
-pcall(function()
-    if Players.LocalPlayer:WaitForChild("PlayerGui"):FindFirstChild(guiName) then
-        Players.LocalPlayer.PlayerGui[guiName]:Destroy()
-    end
-end)
 
 local gui = Instance.new("ScreenGui")
 gui.Name = guiName
-gui.ResetOnSpawn = false -- Keeps GUI on screen if you die
-gui.Parent = guiParent
+gui.ResetOnSpawn = false -- Keeps GUI on screen if you die or reset
+gui.Parent = playerGui
 
 -- Toggle Button (To hide/show menu on mobile)
 local toggleBtn = Instance.new("TextButton")
