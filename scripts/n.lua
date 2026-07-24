@@ -171,7 +171,7 @@ local function triggerInstantSnipe(shopId, targetDict)
 end
 
 -- ==========================================
--- AUTO APPOINT LOOP (ANTI-SIT PROTECTION)
+-- AUTO APPOINT LOOP (CLOSEST LAPTOP FIX)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -185,8 +185,11 @@ task.spawn(function()
                 local mainUi = player.PlayerGui:FindFirstChild("MainUi")
                 local serverFrame = mainUi and mainUi:FindFirstChild("ServerFrame")
                 
-                -- Check if laptop UI is closed. If closed, find laptop, TP, and open it.
+                -- Kung nakasara ang UI, hanapin ang pinakamalapit na laptop
                 if hrp and serverFrame and not serverFrame.Visible then
+                    local closestPrompt = nil
+                    local shortestDistance = math.huge
+                    
                     for _, obj in ipairs(workspace:GetDescendants()) do
                         if obj:IsA("ProximityPrompt") then
                             local n = obj.Name:lower()
@@ -194,48 +197,53 @@ task.spawn(function()
                             local a = obj.ActionText:lower()
                             local pName = obj.Parent and obj.Parent.Name:lower() or ""
                             
-                            -- Iwasan ang upuan para hindi magkamali ng pindot
+                            -- Iwasan ang mga upuan
                             if a:match("sit") or n:match("chair") or o:match("chair") or pName:match("chair") then
                                 continue 
                             end
                             
+                            -- Hanapin ang mga laptop/server prompt
                             if n:match("laptop") or n:match("server") or o:match("laptop") or o:match("server") or pName:match("laptop") then
                                 local part = obj.Parent
                                 if part and part:IsA("BasePart") then
-                                    
-                                    -- Teleport nang mas mataas para hindi madikit sa seat part
-                                    hrp.CFrame = part.CFrame * CFrame.new(0, 3, 2.5)
-                                    task.wait(0.2)
-                                    
-                                    -- I-force tumayo ang character kung sakaling na-sit
-                                    if humanoid then 
-                                        humanoid.Sit = false 
+                                    local dist = (hrp.Position - part.Position).Magnitude
+                                    if dist < shortestDistance then
+                                        shortestDistance = dist
+                                        closestPrompt = obj
                                     end
-                                    task.wait(0.3) 
-                                    
-                                    -- I-trigger yung E button nang bulletproof
-                                    if fireproximityprompt then
-                                        local oldLOS = obj.RequiresLineOfSight
-                                        local oldMax = obj.MaxActivationDistance
-                                        
-                                        obj.RequiresLineOfSight = false
-                                        obj.MaxActivationDistance = 50 
-                                        
-                                        fireproximityprompt(obj)
-                                        
-                                        task.wait(0.2)
-                                        obj.RequiresLineOfSight = oldLOS
-                                        obj.MaxActivationDistance = oldMax
-                                    end
-                                    task.wait(1) -- Hintaying bumukas yung UI sa screen
-                                    break
                                 end
                             end
                         end
                     end
+                    
+                    -- Teleport at open sa pinakamalapit (sarili mong cafe)
+                    if closestPrompt then
+                        local part = closestPrompt.Parent
+                        
+                        hrp.CFrame = part.CFrame * CFrame.new(0, 3, 2.5)
+                        task.wait(0.2)
+                        
+                        if humanoid then humanoid.Sit = false end
+                        task.wait(0.3) 
+                        
+                        if fireproximityprompt then
+                            local oldLOS = closestPrompt.RequiresLineOfSight
+                            local oldMax = closestPrompt.MaxActivationDistance
+                            
+                            closestPrompt.RequiresLineOfSight = false
+                            closestPrompt.MaxActivationDistance = 50 
+                            
+                            fireproximityprompt(closestPrompt)
+                            
+                            task.wait(0.2)
+                            closestPrompt.RequiresLineOfSight = oldLOS
+                            closestPrompt.MaxActivationDistance = oldMax
+                        end
+                        task.wait(1)
+                    end
                 end
                 
-                -- Kapag bukas na ang UI, assign na ng NPC
+                -- Assign Customers Logic
                 if serverFrame and serverFrame.Visible then
                     local pcList = serverFrame:FindFirstChild("PcList")
                     if pcList then
