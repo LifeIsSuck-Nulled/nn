@@ -12,7 +12,7 @@ local MasterPC = false
 local MasterGrocery = false 
 local AutoAppoint = false 
 local AutoChef = false 
-local AutoRepair = false 
+local AutoExtinguish = false 
 local IsShopping = false 
 local CurrentWebhook = "https://webhook.lewisakura.moe/api/webhooks/1530035274422161498/OxDOGd_v9FeYoou_JeSI1odFo_Wfj1oj3V5Hv1QFoRtewlihYIYdiO2DX16YtZVIyO-7"
 local fetch = request or http_request or (syn and syn.request)
@@ -164,7 +164,7 @@ tabButtons["Home"].BackgroundColor3 = Color3.fromRGB(50, 50, 60)
 tabButtons["Home"].TextColor3 = Color3.fromRGB(255, 255, 255)
 
 -- ==========================================
--- INSTANT SNIPE FUNCTION (WITH PACED BUYING)
+-- INSTANT SNIPE FUNCTION 
 -- ==========================================
 local function triggerInstantSnipe(shopId, targetDict)
     task.spawn(function()
@@ -181,7 +181,6 @@ local function triggerInstantSnipe(shopId, targetDict)
                     end
                     
                     if #itemsToBuy > 0 then
-                        -- KAPAG PC PARTS = KAILANGAN MAG TP
                         if shopId == "PcParts" then
                             IsShopping = true 
                             local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -207,7 +206,6 @@ local function triggerInstantSnipe(shopId, targetDict)
                             
                             IsShopping = false 
                         else
-                            -- KAPAG GROCERY = BUMILI SA BACKGROUND WAG MAG TP (May Delay para pasok lahat)
                             task.spawn(function()
                                 for _, item in ipairs(itemsToBuy) do
                                     ShopPurchaseRemote:FireServer(shopId, item.name, item.qty)
@@ -223,60 +221,94 @@ local function triggerInstantSnipe(shopId, targetDict)
 end
 
 -- ==========================================
--- AUTO REPAIR LOOP
+-- AUTO EXTINGUISH LOOP (BRUTE FORCE MECHANIC)
 -- ==========================================
 task.spawn(function()
     while true do
-        task.wait(1)
-        if AutoRepair and not IsShopping then
+        task.wait(1.5)
+        if AutoExtinguish and not IsShopping then
             pcall(function()
                 local player = Players.LocalPlayer
                 local char = player.Character
                 local hrp = char and char:FindFirstChild("HumanoidRootPart")
                 local humanoid = char and char:FindFirstChildWhichIsA("Humanoid")
                 
-                if not hrp then return end
+                if not hrp or not humanoid then return end
                 
-                for _, prompt in ipairs(workspace:GetDescendants()) do
-                    if prompt:IsA("ProximityPrompt") then
-                        local a = prompt.ActionText:lower()
-                        local n = prompt.Name:lower()
-                        local o = prompt.ObjectText:lower()
-                        
-                        if a:match("repair") or a:match("fix") or a:match("extinguish") or a:match("clean") or n:match("repair") or n:match("extinguish") or o:match("fire") then
-                            
-                            local part = prompt.Parent
-                            if part and part:IsA("BasePart") then
-                                
-                                if MyCafePos and (part.Position - MyCafePos).Magnitude > 200 then
-                                    continue
-                                end
-                                
-                                local targetPos = part.Position
-                                hrp.CFrame = CFrame.new(targetPos) * CFrame.new(0, 3, -4)
-                                
-                                task.wait(0.2)
-                                if humanoid then humanoid.Sit = false end
-                                task.wait(0.3)
-                                
-                                if fireproximityprompt then
-                                    local oldLOS = prompt.RequiresLineOfSight
-                                    prompt.RequiresLineOfSight = false
-                                    prompt.MaxActivationDistance = 50
-                                    
-                                    for i=1, 4 do
-                                        fireproximityprompt(prompt)
-                                        task.wait(0.4)
-                                    end
-                                    
-                                    prompt.RequiresLineOfSight = oldLOS
-                                end
-                                
-                                task.wait(1)
-                                break 
+                local fireFound = nil
+                local firePos = nil
+                local isPrompt = false
+                
+                -- Hanapin ang object na may kinalaman sa sunog (Prompt or Particle)
+                for _, obj in ipairs(workspace:GetDescendants()) do
+                    local name = obj.Name:lower()
+                    if obj:IsA("ProximityPrompt") and (name:match("extinguish") or obj.ActionText:lower():match("extinguish") or obj.ObjectText:lower():match("fire")) then
+                        fireFound = obj
+                        firePos = obj.Parent.Position
+                        isPrompt = true
+                        break
+                    elseif (obj:IsA("ParticleEmitter") or obj:IsA("Fire")) and (name:match("fire") or name:match("flame")) then
+                        local part = obj.Parent
+                        if part and part:IsA("BasePart") then
+                            fireFound = obj
+                            firePos = part.Position
+                            break
+                        end
+                    end
+                end
+                
+                if fireFound and firePos then
+                    -- Siguraduhing nasa cafe mo lang yung apoy
+                    if MyCafePos and (firePos - MyCafePos).Magnitude > 200 then return end
+                    
+                    -- Hanapin at I-Equip ang Fire Extinguisher
+                    local backpack = player:FindFirstChild("Backpack")
+                    local extTool = nil
+                    
+                    if backpack then
+                        for _, tool in ipairs(backpack:GetChildren()) do
+                            if tool:IsA("Tool") and (tool.Name:lower():match("extinguish") or tool.Name:lower():match("fire")) then
+                                extTool = tool
+                                humanoid:EquipTool(tool)
+                                break
                             end
                         end
                     end
+                    if not extTool and char then
+                        for _, tool in ipairs(char:GetChildren()) do
+                            if tool:IsA("Tool") and (tool.Name:lower():match("extinguish") or tool.Name:lower():match("fire")) then
+                                extTool = tool
+                                break
+                            end
+                        end
+                    end
+                    
+                    -- Teleport sa tapat ng apoy (Haharap mismo sa coordinates ng fire)
+                    hrp.CFrame = CFrame.lookAt(firePos + Vector3.new(0, 0, 4), firePos)
+                    task.wait(0.3)
+                    if humanoid then humanoid.Sit = false end
+                    task.wait(0.3)
+                    
+                    -- I-spam ang pag-click at prompt fire para mapatay ang apoy
+                    for i = 1, 10 do
+                        -- Activate tool (Simulate Mouse Click)
+                        if extTool then extTool:Activate() end
+                        VirtualUser:ClickButton1(Vector2.new())
+                        
+                        -- Fire Prompt kung may prompt mechanic
+                        if isPrompt and fireproximityprompt then
+                            local oldLOS = fireFound.RequiresLineOfSight
+                            fireFound.RequiresLineOfSight = false
+                            fireFound.MaxActivationDistance = 50
+                            fireproximityprompt(fireFound)
+                            fireFound.RequiresLineOfSight = oldLOS
+                        end
+                        task.wait(0.3)
+                    end
+                    
+                    -- I-unequip ang tool pagkatapos
+                    humanoid:UnequipTools()
+                    task.wait(1)
                 end
             end)
         end
@@ -284,7 +316,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO APPOINT LOOP (WITH BASE MEMORY)
+-- AUTO APPOINT LOOP
 -- ==========================================
 task.spawn(function()
     while true do
@@ -389,7 +421,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO CHEF (WITH CAFE MEMORY LOCK & SHOP PAUSE)
+-- AUTO CHEF 
 -- ==========================================
 task.spawn(function()
     while true do
@@ -651,16 +683,16 @@ toggleChef.TextSize = 13
 toggleChef.Parent = homeTab
 Instance.new("UICorner", toggleChef).CornerRadius = UDim.new(0, 6)
 
-local toggleRepair = Instance.new("TextButton")
-toggleRepair.Size = UDim2.new(0.85, 0, 0, 40)
-toggleRepair.Position = UDim2.new(0.075, 0, 0.69, 0)
-toggleRepair.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-toggleRepair.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleRepair.Text = "🛠️ AUTO REPAIR: OFF"
-toggleRepair.Font = Enum.Font.GothamBlack
-toggleRepair.TextSize = 13
-toggleRepair.Parent = homeTab
-Instance.new("UICorner", toggleRepair).CornerRadius = UDim.new(0, 6)
+local toggleExtinguish = Instance.new("TextButton")
+toggleExtinguish.Size = UDim2.new(0.85, 0, 0, 40)
+toggleExtinguish.Position = UDim2.new(0.075, 0, 0.69, 0)
+toggleExtinguish.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+toggleExtinguish.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: OFF"
+toggleExtinguish.Font = Enum.Font.GothamBlack
+toggleExtinguish.TextSize = 13
+toggleExtinguish.Parent = homeTab
+Instance.new("UICorner", toggleExtinguish).CornerRadius = UDim.new(0, 6)
 
 local statusText = Instance.new("TextLabel")
 statusText.Size = UDim2.new(1, 0, 0, 30)
@@ -718,14 +750,14 @@ toggleChef.MouseButton1Click:Connect(function()
     end
 end)
 
-toggleRepair.MouseButton1Click:Connect(function()
-    AutoRepair = not AutoRepair
-    if AutoRepair then
-        toggleRepair.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        toggleRepair.Text = "🛠️ AUTO REPAIR: ACTIVE"
+toggleExtinguish.MouseButton1Click:Connect(function()
+    AutoExtinguish = not AutoExtinguish
+    if AutoExtinguish then
+        toggleExtinguish.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+        toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: ACTIVE"
     else
-        toggleRepair.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        toggleRepair.Text = "🛠️ AUTO REPAIR: OFF"
+        toggleExtinguish.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+        toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: OFF"
     end
 end)
 
@@ -941,7 +973,7 @@ webhookBox.FocusLost:Connect(function()
 end)
 
 -- ==========================================
--- WEBHOOK & RESTOCK TRACKER (CLEANED UP GROCERY SPAM)
+-- WEBHOOK & RESTOCK TRACKER
 -- ==========================================
 local function sendWebhook(payload)
     if not fetch or CurrentWebhook == "" then return end
@@ -975,12 +1007,10 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
                 local isGrocery = (category == "Grocery")
                 
                 if isGrocery then
-                    -- Bibilhin ang grocery pero wala ng listahan at ping sa Discord
                     if TargetItemsGrocery[itemName] and MasterGrocery then
                         table.insert(groceryItemsToBuy, {id = shopId, name = itemName, qty = quantity})
                     end
                 else
-                    -- PC Parts Logic (Naiwan ang ping at listahan para makita mo ang binibili)
                     local isTargeted = false
                     if TargetItemsPC[itemName] then
                         isTargeted = true
@@ -999,17 +1029,15 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
         end
     end
     
-    -- BILHIN ANG GROCERY NANG WALANG TP O PAUSE AT MAY TAMANG DELAY
     if #groceryItemsToBuy > 0 then
         task.spawn(function()
             for _, item in ipairs(groceryItemsToBuy) do
                 pcall(function() ShopPurchaseRemote:FireServer(item.id, item.name, item.qty) end)
-                task.wait(0.5) -- Tinaasan ang delay para pumasok nang maayos sa server
+                task.wait(0.5) 
             end
         end)
     end
     
-    -- BILHIN ANG PC PARTS NA MAY TP AT TASK LOCK
     if #pcItemsToBuy > 0 then
         task.spawn(function()
             IsShopping = true 
