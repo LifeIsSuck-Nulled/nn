@@ -12,6 +12,7 @@ local MasterPC = false
 local MasterGrocery = false 
 local AutoAppoint = false 
 local AutoChef = false 
+local AutoRepair = false 
 local IsShopping = false 
 local CurrentWebhook = "https://webhook.lewisakura.moe/api/webhooks/1530035274422161498/OxDOGd_v9FeYoou_JeSI1odFo_Wfj1oj3V5Hv1QFoRtewlihYIYdiO2DX16YtZVIyO-7"
 local fetch = request or http_request or (syn and syn.request)
@@ -33,7 +34,7 @@ end)
 -- ==========================================
 local ShopConfig, StockServiceModule, Net
 local ShopPurchaseRemote, SelectPCRemote, AppointRemote
-local CookEvent, DeliverEvent, SelectTrayOrder, AdminRemote
+local CookEvent, DeliverEvent, SelectTrayOrder
 
 pcall(function()
     ShopConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Scripts"):WaitForChild("SHOP_CONFIG"))
@@ -47,16 +48,6 @@ pcall(function()
     CookEvent = Net:RemoteEvent("CookEvent")
     DeliverEvent = Net:RemoteEvent("DeliverEvent")
     SelectTrayOrder = Net:RemoteEvent("SelectTrayOrder")
-end)
-
--- Tinitiyak na mahihintay talaga ang Admin Folder kahit mabagal ang laro
-task.spawn(function()
-    pcall(function()
-        local impEvents = ReplicatedStorage:WaitForChild("IMPORTANT_REMOTE_EVENTS", 10)
-        if impEvents then
-            AdminRemote = impEvents:WaitForChild("AdminMoneyTest", 10)
-        end
-    end)
 end)
 
 -- ==========================================
@@ -167,14 +158,13 @@ local homeTab = createTab("Home", "🏠", 0)
 local pcTab = createTab("PC Parts", "💻", 1)
 local groceryTab = createTab("Grocery", "🍎", 2)
 local setTab = createTab("Settings", "⚙️", 3)
-local adminTab = createTab("Admin", "⚡", 4)
 
 tabs["Home"].Visible = true
 tabButtons["Home"].BackgroundColor3 = Color3.fromRGB(50, 50, 60)
 tabButtons["Home"].TextColor3 = Color3.fromRGB(255, 255, 255)
 
 -- ==========================================
--- INSTANT SNIPE FUNCTION (WITH LOCK & TP)
+-- INSTANT SNIPE FUNCTION (WITH PACED BUYING)
 -- ==========================================
 local function triggerInstantSnipe(shopId, targetDict)
     task.spawn(function()
@@ -191,34 +181,107 @@ local function triggerInstantSnipe(shopId, targetDict)
                     end
                     
                     if #itemsToBuy > 0 then
-                        IsShopping = true 
-                        local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                        local returnCF = nil
-                        
-                        if hrp then
-                            returnCF = hrp.CFrame
-                            hrp.CFrame = ShopCFrame
+                        -- KAPAG PC PARTS = KAILANGAN MAG TP
+                        if shopId == "PcParts" then
+                            IsShopping = true 
+                            local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                            local returnCF = nil
+                            
+                            if hrp then
+                                returnCF = hrp.CFrame
+                                hrp.CFrame = ShopCFrame
+                                task.wait(0.5) 
+                            end
+                            
+                            for _, item in ipairs(itemsToBuy) do
+                                ShopPurchaseRemote:FireServer(shopId, item.name, item.qty)
+                                task.wait(0.5)
+                            end
+                            
                             task.wait(0.5) 
+                            
+                            if hrp and returnCF then
+                                hrp.CFrame = returnCF
+                                task.wait(0.2)
+                            end
+                            
+                            IsShopping = false 
+                        else
+                            -- KAPAG GROCERY = BUMILI SA BACKGROUND WAG MAG TP (May Delay para pasok lahat)
+                            task.spawn(function()
+                                for _, item in ipairs(itemsToBuy) do
+                                    ShopPurchaseRemote:FireServer(shopId, item.name, item.qty)
+                                    task.wait(0.5) 
+                                end
+                            end)
                         end
-                        
-                        for _, item in ipairs(itemsToBuy) do
-                            ShopPurchaseRemote:FireServer(shopId, item.name, item.qty)
-                        end
-                        
-                        task.wait(0.5) 
-                        
-                        if hrp and returnCF then
-                            hrp.CFrame = returnCF
-                            task.wait(0.2)
-                        end
-                        
-                        IsShopping = false 
                     end
                 end
             end
         end)
     end)
 end
+
+-- ==========================================
+-- AUTO REPAIR LOOP
+-- ==========================================
+task.spawn(function()
+    while true do
+        task.wait(1)
+        if AutoRepair and not IsShopping then
+            pcall(function()
+                local player = Players.LocalPlayer
+                local char = player.Character
+                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                local humanoid = char and char:FindFirstChildWhichIsA("Humanoid")
+                
+                if not hrp then return end
+                
+                for _, prompt in ipairs(workspace:GetDescendants()) do
+                    if prompt:IsA("ProximityPrompt") then
+                        local a = prompt.ActionText:lower()
+                        local n = prompt.Name:lower()
+                        local o = prompt.ObjectText:lower()
+                        
+                        if a:match("repair") or a:match("fix") or a:match("extinguish") or a:match("clean") or n:match("repair") or n:match("extinguish") or o:match("fire") then
+                            
+                            local part = prompt.Parent
+                            if part and part:IsA("BasePart") then
+                                
+                                if MyCafePos and (part.Position - MyCafePos).Magnitude > 200 then
+                                    continue
+                                end
+                                
+                                local targetPos = part.Position
+                                hrp.CFrame = CFrame.new(targetPos) * CFrame.new(0, 3, -4)
+                                
+                                task.wait(0.2)
+                                if humanoid then humanoid.Sit = false end
+                                task.wait(0.3)
+                                
+                                if fireproximityprompt then
+                                    local oldLOS = prompt.RequiresLineOfSight
+                                    prompt.RequiresLineOfSight = false
+                                    prompt.MaxActivationDistance = 50
+                                    
+                                    for i=1, 4 do
+                                        fireproximityprompt(prompt)
+                                        task.wait(0.4)
+                                    end
+                                    
+                                    prompt.RequiresLineOfSight = oldLOS
+                                end
+                                
+                                task.wait(1)
+                                break 
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
+end)
 
 -- ==========================================
 -- AUTO APPOINT LOOP (WITH BASE MEMORY)
@@ -326,7 +389,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO CHEF 
+-- AUTO CHEF (WITH CAFE MEMORY LOCK & SHOP PAUSE)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -545,8 +608,8 @@ homeTitle.TextSize = 16
 homeTitle.Parent = homeTab
 
 local togglePC = Instance.new("TextButton")
-togglePC.Size = UDim2.new(0.85, 0, 0, 45)
-togglePC.Position = UDim2.new(0.075, 0, 0.10, 0)
+togglePC.Size = UDim2.new(0.85, 0, 0, 40)
+togglePC.Position = UDim2.new(0.075, 0, 0.05, 0)
 togglePC.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
 togglePC.TextColor3 = Color3.fromRGB(255, 255, 255)
 togglePC.Text = "💻 PC AUTO-BUY: OFF"
@@ -556,8 +619,8 @@ togglePC.Parent = homeTab
 Instance.new("UICorner", togglePC).CornerRadius = UDim.new(0, 6)
 
 local toggleGrocery = Instance.new("TextButton")
-toggleGrocery.Size = UDim2.new(0.85, 0, 0, 45)
-toggleGrocery.Position = UDim2.new(0.075, 0, 0.28, 0)
+toggleGrocery.Size = UDim2.new(0.85, 0, 0, 40)
+toggleGrocery.Position = UDim2.new(0.075, 0, 0.21, 0)
 toggleGrocery.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
 toggleGrocery.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: OFF"
@@ -567,8 +630,8 @@ toggleGrocery.Parent = homeTab
 Instance.new("UICorner", toggleGrocery).CornerRadius = UDim.new(0, 6)
 
 local toggleAppoint = Instance.new("TextButton")
-toggleAppoint.Size = UDim2.new(0.85, 0, 0, 45)
-toggleAppoint.Position = UDim2.new(0.075, 0, 0.46, 0)
+toggleAppoint.Size = UDim2.new(0.85, 0, 0, 40)
+toggleAppoint.Position = UDim2.new(0.075, 0, 0.37, 0)
 toggleAppoint.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
 toggleAppoint.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: OFF"
@@ -578,8 +641,8 @@ toggleAppoint.Parent = homeTab
 Instance.new("UICorner", toggleAppoint).CornerRadius = UDim.new(0, 6)
 
 local toggleChef = Instance.new("TextButton")
-toggleChef.Size = UDim2.new(0.85, 0, 0, 45)
-toggleChef.Position = UDim2.new(0.075, 0, 0.64, 0)
+toggleChef.Size = UDim2.new(0.85, 0, 0, 40)
+toggleChef.Position = UDim2.new(0.075, 0, 0.53, 0)
 toggleChef.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
 toggleChef.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleChef.Text = "🍳 AUTO CHEF: OFF"
@@ -588,9 +651,20 @@ toggleChef.TextSize = 13
 toggleChef.Parent = homeTab
 Instance.new("UICorner", toggleChef).CornerRadius = UDim.new(0, 6)
 
+local toggleRepair = Instance.new("TextButton")
+toggleRepair.Size = UDim2.new(0.85, 0, 0, 40)
+toggleRepair.Position = UDim2.new(0.075, 0, 0.69, 0)
+toggleRepair.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+toggleRepair.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleRepair.Text = "🛠️ AUTO REPAIR: OFF"
+toggleRepair.Font = Enum.Font.GothamBlack
+toggleRepair.TextSize = 13
+toggleRepair.Parent = homeTab
+Instance.new("UICorner", toggleRepair).CornerRadius = UDim.new(0, 6)
+
 local statusText = Instance.new("TextLabel")
 statusText.Size = UDim2.new(1, 0, 0, 30)
-statusText.Position = UDim2.new(0, 0, 0.82, 0)
+statusText.Position = UDim2.new(0, 0, 0.87, 0)
 statusText.BackgroundTransparency = 1
 statusText.TextColor3 = Color3.fromRGB(150, 150, 150)
 statusText.Text = "Status: 🛡️ Anti-AFK Active | 📡 Waiting for Server..."
@@ -641,6 +715,17 @@ toggleChef.MouseButton1Click:Connect(function()
     else
         toggleChef.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
         toggleChef.Text = "🍳 AUTO CHEF: OFF"
+    end
+end)
+
+toggleRepair.MouseButton1Click:Connect(function()
+    AutoRepair = not AutoRepair
+    if AutoRepair then
+        toggleRepair.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+        toggleRepair.Text = "🛠️ AUTO REPAIR: ACTIVE"
+    else
+        toggleRepair.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+        toggleRepair.Text = "🛠️ AUTO REPAIR: OFF"
     end
 end)
 
@@ -856,91 +941,7 @@ webhookBox.FocusLost:Connect(function()
 end)
 
 -- ==========================================
--- ⚡ ADMIN TAB CONTENT (FIXED REMOTES)
--- ==========================================
-local adminHeader = Instance.new("TextLabel")
-adminHeader.Size = UDim2.new(0.9, 0, 0, 30)
-adminHeader.Position = UDim2.new(0.05, 0, 0, 10)
-adminHeader.BackgroundTransparency = 1
-adminHeader.TextColor3 = Color3.fromRGB(255, 255, 255)
-adminHeader.Text = "Admin Exploits"
-adminHeader.Font = Enum.Font.GothamBold
-adminHeader.TextSize = 14
-adminHeader.Parent = adminTab
-
-local amountBox = Instance.new("TextBox")
-amountBox.Size = UDim2.new(0.9, 0, 0, 35)
-amountBox.Position = UDim2.new(0.05, 0, 0, 45)
-amountBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-amountBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-amountBox.Text = "1000000"
-amountBox.PlaceholderText = "Enter Amount..."
-amountBox.Font = Enum.Font.Gotham
-amountBox.TextSize = 12
-amountBox.Parent = adminTab
-Instance.new("UICorner", amountBox).CornerRadius = UDim.new(0, 4)
-Instance.new("UIStroke", amountBox).Color = Color3.fromRGB(60, 60, 70)
-
-local btnAddCash = Instance.new("TextButton")
-btnAddCash.Size = UDim2.new(0.9, 0, 0, 35)
-btnAddCash.Position = UDim2.new(0.05, 0, 0, 90)
-btnAddCash.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-btnAddCash.TextColor3 = Color3.fromRGB(255, 255, 255)
-btnAddCash.Text = "💸 Add Cash"
-btnAddCash.Font = Enum.Font.GothamBold
-btnAddCash.TextSize = 12
-btnAddCash.Parent = adminTab
-Instance.new("UICorner", btnAddCash).CornerRadius = UDim.new(0, 4)
-
-local btnSetMoney = Instance.new("TextButton")
-btnSetMoney.Size = UDim2.new(0.9, 0, 0, 35)
-btnSetMoney.Position = UDim2.new(0.05, 0, 0, 135)
-btnSetMoney.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-btnSetMoney.TextColor3 = Color3.fromRGB(255, 255, 255)
-btnSetMoney.Text = "💰 Set Money"
-btnSetMoney.Font = Enum.Font.GothamBold
-btnSetMoney.TextSize = 12
-btnSetMoney.Parent = adminTab
-Instance.new("UICorner", btnSetMoney).CornerRadius = UDim.new(0, 4)
-
-local btnGiveMoney = Instance.new("TextButton")
-btnGiveMoney.Size = UDim2.new(0.9, 0, 0, 35)
-btnGiveMoney.Position = UDim2.new(0.05, 0, 0, 180)
-btnGiveMoney.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-btnGiveMoney.TextColor3 = Color3.fromRGB(255, 255, 255)
-btnGiveMoney.Text = "🎁 Give Money"
-btnGiveMoney.Font = Enum.Font.GothamBold
-btnGiveMoney.TextSize = 12
-btnGiveMoney.Parent = adminTab
-Instance.new("UICorner", btnGiveMoney).CornerRadius = UDim.new(0, 4)
-
-local function fireAdmin(command)
-    -- Kung hindi nakuha sa initialization, i-try ulit kunin
-    if not AdminRemote then
-        pcall(function()
-            local impEvents = ReplicatedStorage:WaitForChild("IMPORTANT_REMOTE_EVENTS", 3)
-            if impEvents then AdminRemote = impEvents:WaitForChild("AdminMoneyTest", 3) end
-        end)
-    end
-    
-    if AdminRemote then
-        local amt = tonumber(amountBox.Text) or 1000000
-        -- I-blast lahat ng possible arguments baka sakaling isa doon ang tatanggapin
-        pcall(function() AdminRemote:FireServer(command, amt) end)
-        pcall(function() AdminRemote:FireServer(command, Players.LocalPlayer, amt) end)
-        pcall(function() AdminRemote:FireServer(command, Players.LocalPlayer.Name, amt) end)
-        print("[LABA BABY HUB] Fired Admin Event: " .. command .. " for " .. tostring(amt))
-    else
-        warn("[LABA BABY HUB] Admin Remote not found or deleted by server!")
-    end
-end
-
-btnAddCash.MouseButton1Click:Connect(function() fireAdmin("AddCash") end)
-btnSetMoney.MouseButton1Click:Connect(function() fireAdmin("SetMoney") end)
-btnGiveMoney.MouseButton1Click:Connect(function() fireAdmin("GiveMoney") end)
-
--- ==========================================
--- WEBHOOK & RESTOCK TRACKER (WITH LOCK & TP)
+-- WEBHOOK & RESTOCK TRACKER (CLEANED UP GROCERY SPAM)
 -- ==========================================
 local function sendWebhook(payload)
     if not fetch or CurrentWebhook == "" then return end
@@ -958,10 +959,10 @@ local stockSync = ReplicatedStorage:WaitForChild("StockServiceSync")
 stockSync.OnClientEvent:Connect(function(shopId, stockTable)
     local embedsArray = {}
     local pcParts = {}
-    local groceryFood = {}
     local mentionEveryone = false
     
-    local itemsToBuy = {}
+    local pcItemsToBuy = {}
+    local groceryItemsToBuy = {}
     
     statusText.Text = "Status: 🟢 Last Restock at " .. os.date("%H:%M:%S")
     
@@ -973,68 +974,81 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
                 local category = itemData.Category or "Others"
                 local isGrocery = (category == "Grocery")
                 
-                local isTargeted = false
-                if isGrocery and TargetItemsGrocery[itemName] then
-                    isTargeted = true
-                    if MasterGrocery then
-                        mentionEveryone = true
-                        table.insert(itemsToBuy, {id = shopId, name = itemName, qty = quantity})
+                if isGrocery then
+                    -- Bibilhin ang grocery pero wala ng listahan at ping sa Discord
+                    if TargetItemsGrocery[itemName] and MasterGrocery then
+                        table.insert(groceryItemsToBuy, {id = shopId, name = itemName, qty = quantity})
                     end
-                elseif not isGrocery and TargetItemsPC[itemName] then
-                    isTargeted = true
-                    if MasterPC then
-                        mentionEveryone = true
-                        table.insert(itemsToBuy, {id = shopId, name = itemName, qty = quantity})
+                else
+                    -- PC Parts Logic (Naiwan ang ping at listahan para makita mo ang binibili)
+                    local isTargeted = false
+                    if TargetItemsPC[itemName] then
+                        isTargeted = true
+                        if MasterPC then
+                            mentionEveryone = true
+                            table.insert(pcItemsToBuy, {id = shopId, name = itemName, qty = quantity})
+                        end
                     end
+                    local itemObj = {
+                        name = tostring(itemName), quantity = quantity, price = itemData.Price or 0,
+                        perHour = itemData.PerHour or 0, stars = itemData.Stars or 0, isTarget = isTargeted
+                    }
+                    table.insert(pcParts, itemObj)
                 end
-                
-                local itemObj = {
-                    name = tostring(itemName), quantity = quantity, price = itemData.Price or 0,
-                    perHour = itemData.PerHour or 0, stars = itemData.Stars or 0, isTarget = isTargeted
-                }
-                
-                if isGrocery then table.insert(groceryFood, itemObj) else table.insert(pcParts, itemObj) end
             end
         end
     end
     
-    if #itemsToBuy > 0 then
-        IsShopping = true 
-        local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        local returnCF = nil
-        
-        if hrp then
-            returnCF = hrp.CFrame
-            hrp.CFrame = ShopCFrame
+    -- BILHIN ANG GROCERY NANG WALANG TP O PAUSE AT MAY TAMANG DELAY
+    if #groceryItemsToBuy > 0 then
+        task.spawn(function()
+            for _, item in ipairs(groceryItemsToBuy) do
+                pcall(function() ShopPurchaseRemote:FireServer(item.id, item.name, item.qty) end)
+                task.wait(0.5) -- Tinaasan ang delay para pumasok nang maayos sa server
+            end
+        end)
+    end
+    
+    -- BILHIN ANG PC PARTS NA MAY TP AT TASK LOCK
+    if #pcItemsToBuy > 0 then
+        task.spawn(function()
+            IsShopping = true 
+            local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            local returnCF = nil
+            
+            if hrp then
+                returnCF = hrp.CFrame
+                hrp.CFrame = ShopCFrame
+                task.wait(0.5) 
+            end
+            
+            for _, item in ipairs(pcItemsToBuy) do
+                pcall(function() ShopPurchaseRemote:FireServer(item.id, item.name, item.qty) end)
+                task.wait(0.5)
+            end
+            
             task.wait(0.5) 
-        end
-        
-        for _, item in ipairs(itemsToBuy) do
-            pcall(function() ShopPurchaseRemote:FireServer(item.id, item.name, item.qty) end)
-        end
-        
-        task.wait(0.5) 
-        
-        if hrp and returnCF then
-            hrp.CFrame = returnCF
-            task.wait(0.2)
-        end
-        IsShopping = false 
+            
+            if hrp and returnCF then
+                hrp.CFrame = returnCF
+                task.wait(0.2)
+            end
+            IsShopping = false 
+        end)
     end
     
     table.sort(pcParts, function(a, b)
         if a.stars ~= b.stars then return a.stars < b.stars else return a.perHour < b.perHour end
     end)
-    table.sort(groceryFood, function(a, b) return a.price < b.price end)
     
-    local function buildEmbeds(itemList, isGroceryCheck)
+    local function buildEmbeds(itemList)
         local currentFields = {}
         local fieldCount = 0
         local function packEmbed()
             if #currentFields > 0 then
                 table.insert(embedsArray, {
-                    title = isGroceryCheck and ("🛒 " .. tostring(shopId) .. " - FOOD") or ("📦 " .. tostring(shopId) .. " - PC PARTS"),
-                    color = isGroceryCheck and 16753920 or 65280, fields = currentFields
+                    title = "📦 " .. tostring(shopId) .. " - PC PARTS",
+                    color = 65280, fields = currentFields
                 })
                 currentFields = {}
                 fieldCount = 0
@@ -1045,15 +1059,11 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
             local safeName = item.name == "" and "Unknown Item" or item.name
             local displayName = item.isTarget and ("🎯 **" .. safeName:sub(1, 240) .. "**") or ("🔹 " .. safeName:sub(1, 250))
             
-            local statsDesc
-            if isGroceryCheck then
-                statsDesc = string.format("📦 **Stock:** %d\n💵 **Price:** %s\n\u{200B}", item.quantity, tostring(item.price))
-            else
-                local starDisplay = string.rep("⭐", item.stars)
-                if item.stars == 0 then starDisplay = "N/A" end
-                statsDesc = string.format("📦 **Stock:** %d\n💵 **Price:** %s\n⚡ **Per Hour:** %s\n%s\n\u{200B}", 
-                    item.quantity, tostring(item.price), tostring(item.perHour), starDisplay)
-            end
+            local starDisplay = string.rep("⭐", item.stars)
+            if item.stars == 0 then starDisplay = "N/A" end
+            local statsDesc = string.format("📦 **Stock:** %d\n💵 **Price:** %s\n⚡ **Per Hour:** %s\n%s\n\u{200B}", 
+                item.quantity, tostring(item.price), tostring(item.perHour), starDisplay)
+                
             table.insert(currentFields, { name = displayName, value = statsDesc, inline = false })
             fieldCount = fieldCount + 1
             if fieldCount >= 25 then packEmbed() end
@@ -1061,8 +1071,7 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
         if fieldCount > 0 then packEmbed() end
     end
     
-    buildEmbeds(pcParts, false)
-    buildEmbeds(groceryFood, true)
+    buildEmbeds(pcParts)
     
     local currentUnix = os.time()
     local nextRestockUnix = currentUnix + 3600 
