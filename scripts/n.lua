@@ -12,6 +12,7 @@ local MasterPC = false
 local MasterGrocery = false 
 local AutoAppoint = false 
 local AutoChef = false 
+local IsShopping = false -- TASK LOCK PARA HINDI MAG-AGAWAN SA TELEPORT
 local CurrentWebhook = "https://webhook.lewisakura.moe/api/webhooks/1530035274422161498/OxDOGd_v9FeYoou_JeSI1odFo_Wfj1oj3V5Hv1QFoRtewlihYIYdiO2DX16YtZVIyO-7"
 local fetch = request or http_request or (syn and syn.request)
 
@@ -35,7 +36,7 @@ end)
 -- ==========================================
 local ShopConfig, StockServiceModule, Net
 local ShopPurchaseRemote, SelectPCRemote, AppointRemote
-local CookEvent, DeliverEvent, SelectTrayOrder
+local CookEvent, DeliverEvent, SelectTrayOrder, AdminRemote
 
 pcall(function()
     ShopConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Scripts"):WaitForChild("SHOP_CONFIG"))
@@ -49,6 +50,12 @@ pcall(function()
     CookEvent = Net:RemoteEvent("CookEvent")
     DeliverEvent = Net:RemoteEvent("DeliverEvent")
     SelectTrayOrder = Net:RemoteEvent("SelectTrayOrder")
+    
+    -- ADMIN EXPLOIT REMOTE
+    local impEvents = ReplicatedStorage:FindFirstChild("IMPORTANT_REMOTE_EVENTS")
+    if impEvents then
+        AdminRemote = impEvents:FindFirstChild("AdminMoneyTest")
+    end
 end)
 
 -- ==========================================
@@ -159,13 +166,14 @@ local homeTab = createTab("Home", "🏠", 0)
 local pcTab = createTab("PC Parts", "💻", 1)
 local groceryTab = createTab("Grocery", "🍎", 2)
 local setTab = createTab("Settings", "⚙️", 3)
+local adminTab = createTab("Admin", "⚡", 4)
 
 tabs["Home"].Visible = true
 tabButtons["Home"].BackgroundColor3 = Color3.fromRGB(50, 50, 60)
 tabButtons["Home"].TextColor3 = Color3.fromRGB(255, 255, 255)
 
 -- ==========================================
--- INSTANT SNIPE FUNCTION (WITH RETURN TP)
+-- INSTANT SNIPE FUNCTION (WITH LOCK & TP)
 -- ==========================================
 local function triggerInstantSnipe(shopId, targetDict)
     task.spawn(function()
@@ -182,28 +190,29 @@ local function triggerInstantSnipe(shopId, targetDict)
                     end
                     
                     if #itemsToBuy > 0 then
+                        IsShopping = true -- I-PAUSE ANG IBANG TASKS
                         local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                         local returnCF = nil
                         
-                        -- Save current position and go to shop
                         if hrp then
                             returnCF = hrp.CFrame
                             hrp.CFrame = ShopCFrame
-                            task.wait(0.3) 
+                            task.wait(0.5) 
                         end
                         
-                        -- Buy items
                         for _, item in ipairs(itemsToBuy) do
                             ShopPurchaseRemote:FireServer(shopId, item.name, item.qty)
                         end
                         
-                        -- Return to base
+                        task.wait(0.5) 
+                        
                         if hrp and returnCF then
-                            task.wait(0.3)
                             hrp.CFrame = returnCF
+                            task.wait(0.2)
                         end
+                        
+                        IsShopping = false -- I-RESUME ANG MGA TASKS
                     end
-                    
                 end
             end
         end)
@@ -216,7 +225,7 @@ end
 task.spawn(function()
     while true do
         task.wait(1.5)
-        if AutoAppoint then
+        if AutoAppoint and not IsShopping then 
             pcall(function()
                 local player = Players.LocalPlayer
                 local char = player.Character
@@ -229,7 +238,6 @@ task.spawn(function()
                     
                     local closestPrompt = MyHomeLaptop
                     
-                    -- Hanapin ang sariling laptop kung wala pa sa memory
                     if not closestPrompt or not closestPrompt.Parent then
                         local shortestDistance = math.huge
                         
@@ -242,7 +250,6 @@ task.spawn(function()
                                     local part = obj.Parent
                                     if part and part:IsA("BasePart") then
                                         local dist = (hrp.Position - part.Position).Magnitude
-                                        -- I-save lang kapag malapit sa player (nasa loob ng cafe)
                                         if dist < shortestDistance and dist < 150 then
                                             shortestDistance = dist
                                             closestPrompt = obj
@@ -252,7 +259,6 @@ task.spawn(function()
                             end
                         end
                         
-                        -- I-save sa memory para kahit pumunta ng shop, ito pa rin ang babalikan!
                         if closestPrompt then
                             MyHomeLaptop = closestPrompt
                             MyCafePos = closestPrompt.Parent.Position
@@ -279,7 +285,7 @@ task.spawn(function()
                         end
                     end
                     
-                    if closestPrompt and hasCustomer then
+                    if closestPrompt and hasCustomer and not IsShopping then
                         local part = closestPrompt.Parent
                         hrp.CFrame = part.CFrame * CFrame.new(0, 3, 2.5)
                         task.wait(0.2)
@@ -296,11 +302,11 @@ task.spawn(function()
                     end
                 end
                 
-                if serverFrame and serverFrame.Visible then
+                if serverFrame and serverFrame.Visible and not IsShopping then
                     local pcList = serverFrame:FindFirstChild("PcList")
                     if pcList then
                         for _, pcFrame in ipairs(pcList:GetChildren()) do
-                            if not AutoAppoint then break end
+                            if not AutoAppoint or IsShopping then break end
                             if pcFrame:IsA("Frame") then
                                 local pcName = pcFrame.Name
                                 if SelectPCRemote and AppointRemote then
@@ -319,12 +325,12 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO CHEF (WITH CAFE MEMORY LOCK)
+-- AUTO CHEF (WITH CAFE MEMORY LOCK & SHOP PAUSE)
 -- ==========================================
 task.spawn(function()
     while true do
         task.wait(1.5)
-        if AutoChef then
+        if AutoChef and not IsShopping then
             pcall(function()
                 local player = Players.LocalPlayer
                 local char = player.Character
@@ -344,8 +350,7 @@ task.spawn(function()
                     end
                 end
                 
-                -- DELIVER FOOD
-                if #trayItems > 0 then
+                if #trayItems > 0 and not IsShopping then
                     local equippedItem = nil
                     local firstItem = trayItems[1]
                     
@@ -374,14 +379,13 @@ task.spawn(function()
                         if targetPCNumber then
                             local foundPC = nil
                             local shortestDist = 400 
-                            
                             local validPrefixes = {"pc", "desk", "table", "computer"}
                             
                             for _, obj in ipairs(workspace:GetDescendants()) do
                                 if obj:IsA("Model") or obj:IsA("Folder") or obj:IsA("BasePart") then
                                     local rawName = obj.Name:lower():gsub("%s+", ""):gsub("_", "")
-                                    
                                     local isMatch = false
+                                    
                                     if rawName == targetPCNumber then
                                         isMatch = true
                                     else
@@ -402,9 +406,6 @@ task.spawn(function()
                                         end
                                         
                                         if pos then
-                                            -- =====================================
-                                            -- MEMORY LOCK: WAG PAPANSININ KUNG NASA IBANG CAFE
-                                            -- =====================================
                                             if MyCafePos and (pos - MyCafePos).Magnitude > 200 then
                                                 continue 
                                             end
@@ -419,7 +420,7 @@ task.spawn(function()
                                 end
                             end
                             
-                            if foundPC then
+                            if foundPC and not IsShopping then
                                 local pcPos
                                 if foundPC:IsA("Model") then
                                     pcPos = foundPC.PrimaryPart and foundPC.PrimaryPart.Position or foundPC:GetModelCFrame().Position
@@ -482,8 +483,7 @@ task.spawn(function()
                     end
                 end
                 
-                -- PHASE 2: PREPARE MORE FOOD (< 3 tray items)
-                if #trayItems < 3 then
+                if #trayItems < 3 and not IsShopping then
                     local prepFrame = mainUi:FindFirstChild("Cooking") and mainUi.Cooking:FindFirstChild("PreparingFrame")
                     if prepFrame then
                         for _, v in ipairs(prepFrame:GetChildren()) do
@@ -855,7 +855,71 @@ webhookBox.FocusLost:Connect(function()
 end)
 
 -- ==========================================
--- WEBHOOK & RESTOCK TRACKER
+-- ⚡ ADMIN TAB CONTENT
+-- ==========================================
+local adminHeader = Instance.new("TextLabel")
+adminHeader.Size = UDim2.new(0.9, 0, 0, 30)
+adminHeader.Position = UDim2.new(0.05, 0, 0, 10)
+adminHeader.BackgroundTransparency = 1
+adminHeader.TextColor3 = Color3.fromRGB(255, 255, 255)
+adminHeader.Text = "Admin Exploits"
+adminHeader.Font = Enum.Font.GothamBold
+adminHeader.TextSize = 14
+adminHeader.Parent = adminTab
+
+local amountBox = Instance.new("TextBox")
+amountBox.Size = UDim2.new(0.9, 0, 0, 35)
+amountBox.Position = UDim2.new(0.05, 0, 0, 45)
+amountBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+amountBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+amountBox.Text = "1000000"
+amountBox.PlaceholderText = "Enter Amount..."
+amountBox.Font = Enum.Font.Gotham
+amountBox.TextSize = 12
+amountBox.Parent = adminTab
+Instance.new("UICorner", amountBox).CornerRadius = UDim.new(0, 4)
+Instance.new("UIStroke", amountBox).Color = Color3.fromRGB(60, 60, 70)
+
+local btnAddCash = Instance.new("TextButton")
+btnAddCash.Size = UDim2.new(0.9, 0, 0, 35)
+btnAddCash.Position = UDim2.new(0.05, 0, 0, 90)
+btnAddCash.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+btnAddCash.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnAddCash.Text = "💸 Add Cash"
+btnAddCash.Font = Enum.Font.GothamBold
+btnAddCash.TextSize = 12
+btnAddCash.Parent = adminTab
+Instance.new("UICorner", btnAddCash).CornerRadius = UDim.new(0, 4)
+
+local btnSetMoney = Instance.new("TextButton")
+btnSetMoney.Size = UDim2.new(0.9, 0, 0, 35)
+btnSetMoney.Position = UDim2.new(0.05, 0, 0, 135)
+btnSetMoney.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+btnSetMoney.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnSetMoney.Text = "💰 Set Money"
+btnSetMoney.Font = Enum.Font.GothamBold
+btnSetMoney.TextSize = 12
+btnSetMoney.Parent = adminTab
+Instance.new("UICorner", btnSetMoney).CornerRadius = UDim.new(0, 4)
+
+local function fireAdmin(command)
+    if AdminRemote then
+        local amt = tonumber(amountBox.Text) or 1000000
+        -- Multi-fire para siguradong tumama sa hinihinging argument ng server
+        pcall(function() AdminRemote:FireServer(command, amt) end)
+        pcall(function() AdminRemote:FireServer(command, Players.LocalPlayer, amt) end)
+        pcall(function() AdminRemote:FireServer(command, Players.LocalPlayer.Name, amt) end)
+        print("[LABA BABY HUB] Fired Admin Event: " .. command)
+    else
+        warn("[LABA BABY HUB] Admin Remote not found!")
+    end
+end
+
+btnAddCash.MouseButton1Click:Connect(function() fireAdmin("AddCash") end)
+btnSetMoney.MouseButton1Click:Connect(function() fireAdmin("SetMoney") end)
+
+-- ==========================================
+-- WEBHOOK & RESTOCK TRACKER (WITH LOCK & TP)
 -- ==========================================
 local function sendWebhook(payload)
     if not fetch or CurrentWebhook == "" then return end
@@ -914,25 +978,27 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
     end
     
     if #itemsToBuy > 0 then
+        IsShopping = true 
         local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         local returnCF = nil
         
-        -- Mag-save ng current location at TP sa shop
         if hrp then
             returnCF = hrp.CFrame
             hrp.CFrame = ShopCFrame
-            task.wait(0.3) 
+            task.wait(0.5) 
         end
         
         for _, item in ipairs(itemsToBuy) do
             pcall(function() ShopPurchaseRemote:FireServer(item.id, item.name, item.qty) end)
         end
         
-        -- Ibalik sa sariling cafe
+        task.wait(0.5) 
+        
         if hrp and returnCF then
-            task.wait(0.3)
             hrp.CFrame = returnCF
+            task.wait(0.2)
         end
+        IsShopping = false 
     end
     
     table.sort(pcParts, function(a, b)
