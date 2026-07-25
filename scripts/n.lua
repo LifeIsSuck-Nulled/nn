@@ -344,34 +344,8 @@ local function secureBuy(shopId, itemsToBuy, requiresTP)
     end)
 end
 
-local function triggerInstantSnipe(shopId, targetDict)
-    task.spawn(function()
-        pcall(function()
-            if StockServiceModule and ShopPurchaseRemote then
-                local currentStock = StockServiceModule:GetAll(shopId)
-                if type(currentStock) == "table" then
-                    local itemsToBuy = {}
-                    for itemName, quantity in pairs(currentStock) do
-                        if type(quantity) == "number" and quantity > 0 and targetDict[itemName] then
-                            table.insert(itemsToBuy, {name = itemName, qty = quantity})
-                        end
-                    end
-                    
-                    if #itemsToBuy > 0 then
-                        if shopId == "PcParts" then
-                            secureBuy(shopId, itemsToBuy, true)
-                        else
-                            secureBuy(shopId, itemsToBuy, false)
-                        end
-                    end
-                end
-            end
-        end)
-    end)
-end
-
 -- ==========================================
--- AUTO EXTINGUISH LOOP 
+-- AUTO EXTINGUISH LOOP
 -- ==========================================
 task.spawn(function()
     while true do
@@ -410,12 +384,24 @@ task.spawn(function()
                     local targetPos = firePart.Position
                     if MyCafePos and (targetPos - MyCafePos).Magnitude > 200 then return end
                     
+                    hrp.CFrame = CFrame.new(targetPos) * CFrame.new(0, 3, -4)
+                    task.wait(0.2)
+                    hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(targetPos.X, hrp.Position.Y, targetPos.Z))
+                    task.wait(0.3)
+                    if humanoid then humanoid.Sit = false end
+                    
                     local backpack = player:FindFirstChild("Backpack")
                     local extTool = nil
                     
+                    local function isExtinguisher(t)
+                        if not t:IsA("Tool") then return false end
+                        local n = t.Name:lower()
+                        return n:match("extinguish") or n:match("fire")
+                    end
+                    
                     if backpack then
                         for _, tool in ipairs(backpack:GetChildren()) do
-                            if tool:IsA("Tool") and (tool.Name:lower():match("extinguish") or tool.Name:lower():match("fire")) then
+                            if isExtinguisher(tool) then
                                 extTool = tool
                                 humanoid:EquipTool(tool)
                                 break
@@ -424,17 +410,14 @@ task.spawn(function()
                     end
                     if not extTool and char then
                         for _, tool in ipairs(char:GetChildren()) do
-                            if tool:IsA("Tool") and (tool.Name:lower():match("extinguish") or tool.Name:lower():match("fire")) then
+                            if isExtinguisher(tool) then
                                 extTool = tool
                                 break
                             end
                         end
                     end
                     
-                    hrp.CFrame = CFrame.new(targetPos) * CFrame.new(0, 3, -4)
-                    task.wait(0.3)
-                    if humanoid then humanoid.Sit = false end
-                    task.wait(0.3)
+                    task.wait(0.5) 
                     
                     for i = 1, 10 do
                         if extTool then extTool:Activate() end
@@ -494,12 +477,25 @@ task.spawn(function()
                     if messFound and messPos then
                         if MyCafePos and (messPos - MyCafePos).Magnitude > 200 then return end
                         
+                        hrp.CFrame = CFrame.new(messPos) * CFrame.new(0, 2.5, 2.5)
+                        task.wait(0.2)
+                        hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(messPos.X, hrp.Position.Y, messPos.Z))
+                        task.wait(0.3)
+                        if humanoid then humanoid.Sit = false end
+                        
                         local backpack = player:FindFirstChild("Backpack")
                         local broomTool = nil
                         
-                        local function isBroom(tool)
-                            local n = tool.Name:lower()
-                            return tool:IsA("Tool") and (n:match("broom") or n:match("clean") or n:match("mop") or n:match("sweep"))
+                        local function isBroom(t)
+                            if not t:IsA("Tool") then return false end
+                            local n = t.Name:lower()
+                            if n:match("broom") or n:match("clean") or n:match("mop") or n:match("sweep") or n:match("brush") then 
+                                return true 
+                            end
+                            if not n:match("fire") and not n:match("extinguish") then 
+                                return true 
+                            end
+                            return false
                         end
                         
                         if backpack then
@@ -520,12 +516,9 @@ task.spawn(function()
                             end
                         end
                         
-                        hrp.CFrame = CFrame.new(messPos) * CFrame.new(0, 3, -4)
-                        task.wait(0.3)
-                        if humanoid then humanoid.Sit = false end
-                        task.wait(0.3)
+                        task.wait(0.5) 
                         
-                        for i = 1, 5 do
+                        for i = 1, 8 do
                             if broomTool then broomTool:Activate() end
                             VirtualUser:ClickButton1(Vector2.new())
                             
@@ -953,7 +946,6 @@ togglePC.MouseButton1Click:Connect(function()
     if MasterPC then
         togglePC.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
         togglePC.Text = "💻 PC AUTO-BUY: ACTIVE"
-        triggerInstantSnipe("PcParts", TargetItemsPC)
     else
         togglePC.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
         togglePC.Text = "💻 PC AUTO-BUY: OFF"
@@ -965,7 +957,6 @@ toggleGrocery.MouseButton1Click:Connect(function()
     if MasterGrocery then
         toggleGrocery.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
         toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: ACTIVE"
-        triggerInstantSnipe("Grocery", TargetItemsGrocery)
     else
         toggleGrocery.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
         toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: OFF"
@@ -1017,13 +1008,17 @@ toggleClean.MouseButton1Click:Connect(function()
 end)
 
 -- ==========================================
--- DATA PROCESSING (SMART CPU & MOUSEPAD FIX)
+-- DATA PROCESSING (PERFECT SORTING & EXACT CATEGORIES)
 -- ==========================================
 local guiItemsPC = {}
 local guiItemsGrocery = {}
-local pcCategories = { ["All"] = true }
 
--- Eksaktong listahan galing sa mga binigay mong screenshots
+-- Pinuwersa ko na nandiyan palagi ang CPU at Mousepad sa system
+local uniqueCats = {
+    ["CPU"] = true,
+    ["Mousepad"] = true
+}
+
 local knownMousepads = {
     ["Nocturne"] = true, ["Revv"] = true, ["Shadow"] = true, ["Horizon"] = true, ["Fuji"] = true,
     ["Petal"] = true, ["Sora"] = true, ["Evergreen"] = true, ["Konoha"] = true, ["Kasumi"] = true,
@@ -1041,37 +1036,41 @@ if ShopConfig and type(ShopConfig.Items) == "table" then
     for itemName, itemData in pairs(ShopConfig.Items) do
         local cat = itemData.Category or "Other"
         
-        -- Smart Override para sa CPU at Mousepad base sa images mo
-        if knownMousepads[itemName] or itemName:lower():match("mousepad") then
+        if knownMousepads[itemName] then
             cat = "Mousepad"
-        elseif knownCPUs[itemName] or itemName:lower():match("core") or itemName:lower():match("drift") or itemName:lower():match("nexus") or itemName:lower():match("sakura") or itemName:lower():match("polar") or itemName:lower():match("voltara") or itemName:lower():match("hexora") or itemName:lower():match("vesta") or itemName:lower():match("trifan") then
+        elseif knownCPUs[itemName] then
             cat = "CPU"
         end
         
         local itemEntry = {
             name = tostring(itemName),
             category = cat,
-            stars = itemData.Stars or 0,
-            price = itemData.Price or 0
+            stars = tonumber(itemData.Stars) or 0,
+            price = tonumber(itemData.Price) or 0
         }
+        
         if cat == "Grocery" then
             table.insert(guiItemsGrocery, itemEntry)
         else
-            pcCategories[cat] = true
+            uniqueCats[cat] = true
             table.insert(guiItemsPC, itemEntry)
         end
     end
 end
 
+-- Sorting: Pinakamataas na stars una, kapag parehas (or 0), pinakamahal na price una
 local function sortItems(a, b)
-    if a.stars ~= b.stars then return a.stars > b.stars
-    else return a.price > b.price end
+    if a.stars ~= b.stars then 
+        return a.stars > b.stars
+    else 
+        return a.price > b.price 
+    end
 end
 table.sort(guiItemsPC, sortItems)
 table.sort(guiItemsGrocery, sortItems)
 
 -- ==========================================
--- 💻 PC PARTS TAB CONTENT
+-- 💻 PC PARTS TAB CONTENT & DROPDOWN LOGIC
 -- ==========================================
 local pcDropdownBtn = Instance.new("TextButton")
 pcDropdownBtn.Size = UDim2.new(0.9, 0, 0, 30)
@@ -1132,7 +1131,6 @@ local function refreshPCList()
                     TargetItemsPC[item.name] = true
                     btn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
                     btn.Text = " ☑ " .. item.name .. " " .. starDisplay
-                    if MasterPC then triggerInstantSnipe("PcParts", {[item.name] = true}) end
                 end
             end)
         end
@@ -1141,7 +1139,20 @@ local function refreshPCList()
     pcScroll.CanvasSize = UDim2.new(0, 0, 0, pcLayout.AbsoluteContentSize.Y + 10)
 end
 
-for cat, _ in pairs(pcCategories) do
+-- ==========================================
+-- FIX: "ALL" AT THE TOP FOREVER
+-- ==========================================
+local sortedCategoryList = {"All"}
+local tempCatList = {}
+for c, _ in pairs(uniqueCats) do
+    table.insert(tempCatList, c)
+end
+table.sort(tempCatList)
+for _, c in ipairs(tempCatList) do
+    table.insert(sortedCategoryList, c)
+end
+
+for _, cat in ipairs(sortedCategoryList) do
     local choiceBtn = Instance.new("TextButton")
     choiceBtn.Size = UDim2.new(1, 0, 0, 30)
     choiceBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
@@ -1159,7 +1170,13 @@ for cat, _ in pairs(pcCategories) do
         refreshPCList()
     end)
 end
-pcDropdownFrame.CanvasSize = UDim2.new(0, 0, 0, pcDropLayout.AbsoluteContentSize.Y)
+
+-- IMPORTANT FIX: Wait briefly for UI to calculate size before applying it
+task.spawn(function()
+    task.wait(0.2)
+    pcDropdownFrame.CanvasSize = UDim2.new(0, 0, 0, pcDropLayout.AbsoluteContentSize.Y)
+end)
+
 pcDropdownBtn.MouseButton1Click:Connect(function() pcDropdownFrame.Visible = not pcDropdownFrame.Visible end)
 refreshPCList()
 
@@ -1206,7 +1223,6 @@ for _, item in ipairs(guiItemsGrocery) do
             TargetItemsGrocery[item.name] = true
             btn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
             btn.Text = " ☑ " .. item.name
-            if MasterGrocery then triggerInstantSnipe("Grocery", {[item.name] = true}) end
         end
     end)
 end
@@ -1251,8 +1267,8 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
                         end
                     end
                     local itemObj = {
-                        name = tostring(itemName), quantity = quantity, price = itemData.Price or 0,
-                        perHour = itemData.PerHour or 0, stars = itemData.Stars or 0, isTarget = isTargeted
+                        name = tostring(itemName), quantity = quantity, price = tonumber(itemData.Price) or 0,
+                        perHour = itemData.PerHour or 0, stars = tonumber(itemData.Stars) or 0, isTarget = isTargeted
                     }
                     table.insert(pcParts, itemObj)
                 end
@@ -1269,7 +1285,11 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
     end
     
     table.sort(pcParts, function(a, b)
-        if a.stars ~= b.stars then return a.stars < b.stars else return a.perHour < b.perHour end
+        if a.stars ~= b.stars then 
+            return a.stars > b.stars
+        else 
+            return a.price > b.price 
+        end
     end)
     
     local function buildEmbeds(itemList)
