@@ -14,7 +14,7 @@ local AutoAppoint = false
 local AutoChef = false 
 local AutoExtinguish = false 
 local IsShopping = false 
-local CurrentWebhook = "https://webhook.lewisakura.moe/api/webhooks/1530035274422161498/OxDOGd_v9FeYoou_JeSI1odFo_Wfj1oj3V5Hv1QFoRtewlihYIYdiO2DX16YtZVIyO-7"
+local CurrentWebhook = "" -- Blangko muna, kukunin natin sa Login Screen
 local fetch = request or http_request or (syn and syn.request)
 
 local MyHomeLaptop = nil
@@ -51,6 +51,21 @@ pcall(function()
 end)
 
 -- ==========================================
+-- WEBHOOK HELPER (NILIPAT SA TAAS PARA MAGAMIT AGAD)
+-- ==========================================
+local function sendWebhook(payload)
+    if not fetch or CurrentWebhook == "" then return end
+    pcall(function()
+        fetch({
+            Url = CurrentWebhook,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode(payload)
+        })
+    end)
+end
+
+-- ==========================================
 -- UI SETUP (LABA BABY HUB)
 -- ==========================================
 local guiName = "LabaBabyHubGUI"
@@ -62,6 +77,64 @@ gui.Name = guiName
 gui.ResetOnSpawn = false
 gui.Parent = playerGui
 
+-- ==========================================
+-- WEBHOOK LOGIN SCREEN (BAGO)
+-- ==========================================
+local loginFrame = Instance.new("Frame")
+loginFrame.Size = UDim2.new(0, 350, 0, 180)
+loginFrame.Position = UDim2.new(0.5, -175, 0.5, -90)
+loginFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+loginFrame.Parent = gui
+Instance.new("UICorner", loginFrame).CornerRadius = UDim.new(0, 8)
+Instance.new("UIStroke", loginFrame).Color = Color3.fromRGB(60, 60, 70)
+
+local loginTitle = Instance.new("TextLabel")
+loginTitle.Size = UDim2.new(1, 0, 0, 40)
+loginTitle.BackgroundTransparency = 1
+loginTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+loginTitle.Text = "LABA BABY HUB - LOGIN"
+loginTitle.Font = Enum.Font.GothamBlack
+loginTitle.TextSize = 16
+loginTitle.Parent = loginFrame
+
+local webhookDesc = Instance.new("TextLabel")
+webhookDesc.Size = UDim2.new(0.9, 0, 0, 20)
+webhookDesc.Position = UDim2.new(0.05, 0, 0, 45)
+webhookDesc.BackgroundTransparency = 1
+webhookDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+webhookDesc.Text = "Please enter your Discord Webhook URL:"
+webhookDesc.Font = Enum.Font.GothamMedium
+webhookDesc.TextSize = 12
+webhookDesc.Parent = loginFrame
+
+local webhookInput = Instance.new("TextBox")
+webhookInput.Size = UDim2.new(0.9, 0, 0, 35)
+webhookInput.Position = UDim2.new(0.05, 0, 0, 70)
+webhookInput.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+webhookInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+webhookInput.PlaceholderText = "https://discord.com/api/webhooks/..."
+webhookInput.Text = ""
+webhookInput.ClearTextOnFocus = false
+webhookInput.Font = Enum.Font.Gotham
+webhookInput.TextSize = 11
+webhookInput.Parent = loginFrame
+Instance.new("UICorner", webhookInput).CornerRadius = UDim.new(0, 4)
+Instance.new("UIStroke", webhookInput).Color = Color3.fromRGB(50, 50, 60)
+
+local launchBtn = Instance.new("TextButton")
+launchBtn.Size = UDim2.new(0.9, 0, 0, 40)
+launchBtn.Position = UDim2.new(0.05, 0, 0, 120)
+launchBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+launchBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+launchBtn.Text = "🚀 LAUNCH HUB"
+launchBtn.Font = Enum.Font.GothamBold
+launchBtn.TextSize = 14
+launchBtn.Parent = loginFrame
+Instance.new("UICorner", launchBtn).CornerRadius = UDim.new(0, 6)
+
+-- ==========================================
+-- MAIN HUB UI ELEMENTS (HIDDEN INITIALLY)
+-- ==========================================
 local openBtn = Instance.new("TextButton")
 openBtn.Size = UDim2.new(0, 130, 0, 40)
 openBtn.Position = UDim2.new(0, 10, 0, 10)
@@ -70,6 +143,7 @@ openBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 openBtn.Text = "🎯 Open Menu"
 openBtn.Font = Enum.Font.GothamBold
 openBtn.TextSize = 14
+openBtn.Visible = false -- Naka-hide hanggat walang webhook
 openBtn.Parent = gui
 Instance.new("UICorner", openBtn).CornerRadius = UDim.new(0, 6)
 
@@ -83,6 +157,23 @@ mainFrame.Draggable = true
 mainFrame.Parent = gui
 Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
 Instance.new("UIStroke", mainFrame).Color = Color3.fromRGB(60, 60, 70)
+
+-- LOGIN BUTTON LOGIC
+launchBtn.MouseButton1Click:Connect(function()
+    local inputStr = webhookInput.Text
+    if inputStr ~= "" and (inputStr:match("http://") or inputStr:match("https://")) then
+        CurrentWebhook = inputStr
+        loginFrame:Destroy() -- Tanggalin ang login screen
+        openBtn.Visible = true -- Ipakita ang open menu
+        sendWebhook({username = "Laba Baby Hub", embeds = {{title = "HUB CONNECTED", description = "Laba Baby Hub is Online. Toggles are OFF by default.", color = 3447003}}})
+    else
+        launchBtn.Text = "❌ INVALID WEBHOOK URL"
+        launchBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        task.wait(1.5)
+        launchBtn.Text = "🚀 LAUNCH HUB"
+        launchBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+    end
+end)
 
 local closeBtn = Instance.new("TextButton")
 closeBtn.Size = UDim2.new(0, 30, 0, 30)
@@ -157,7 +248,7 @@ end
 local homeTab = createTab("Home", "🏠", 0)
 local pcTab = createTab("PC Parts", "💻", 1)
 local groceryTab = createTab("Grocery", "🍎", 2)
-local setTab = createTab("Settings", "⚙️", 3)
+-- Tinanggal na yung Settings / Webhook Tab
 
 tabs["Home"].Visible = true
 tabButtons["Home"].BackgroundColor3 = Color3.fromRGB(50, 50, 60)
@@ -239,7 +330,6 @@ task.spawn(function()
                 local firePos = nil
                 local isPrompt = false
                 
-                -- Hanapin ang object na may kinalaman sa sunog (Prompt or Particle)
                 for _, obj in ipairs(workspace:GetDescendants()) do
                     local name = obj.Name:lower()
                     if obj:IsA("ProximityPrompt") and (name:match("extinguish") or obj.ActionText:lower():match("extinguish") or obj.ObjectText:lower():match("fire")) then
@@ -258,10 +348,8 @@ task.spawn(function()
                 end
                 
                 if fireFound and firePos then
-                    -- Siguraduhing nasa cafe mo lang yung apoy
                     if MyCafePos and (firePos - MyCafePos).Magnitude > 200 then return end
                     
-                    -- Hanapin at I-Equip ang Fire Extinguisher
                     local backpack = player:FindFirstChild("Backpack")
                     local extTool = nil
                     
@@ -283,19 +371,15 @@ task.spawn(function()
                         end
                     end
                     
-                    -- Teleport sa tapat ng apoy (Haharap mismo sa coordinates ng fire)
                     hrp.CFrame = CFrame.lookAt(firePos + Vector3.new(0, 0, 4), firePos)
                     task.wait(0.3)
                     if humanoid then humanoid.Sit = false end
                     task.wait(0.3)
                     
-                    -- I-spam ang pag-click at prompt fire para mapatay ang apoy
                     for i = 1, 10 do
-                        -- Activate tool (Simulate Mouse Click)
                         if extTool then extTool:Activate() end
                         VirtualUser:ClickButton1(Vector2.new())
                         
-                        -- Fire Prompt kung may prompt mechanic
                         if isPrompt and fireproximityprompt then
                             local oldLOS = fireFound.RequiresLineOfSight
                             fireFound.RequiresLineOfSight = false
@@ -306,7 +390,6 @@ task.spawn(function()
                         task.wait(0.3)
                     end
                     
-                    -- I-unequip ang tool pagkatapos
                     humanoid:UnequipTools()
                     task.wait(1)
                 end
@@ -939,54 +1022,8 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- ⚙️ SETTINGS TAB CONTENT
+-- RESTOCK TRACKER
 -- ==========================================
-local setLabel = Instance.new("TextLabel")
-setLabel.Size = UDim2.new(0.9, 0, 0, 30)
-setLabel.Position = UDim2.new(0.05, 0, 0, 20)
-setLabel.BackgroundTransparency = 1
-setLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-setLabel.Text = "Discord Webhook URL:"
-setLabel.TextXAlignment = Enum.TextXAlignment.Left
-setLabel.Font = Enum.Font.GothamSemibold
-setLabel.TextSize = 13
-setLabel.Parent = setTab
-
-local webhookBox = Instance.new("TextBox")
-webhookBox.Size = UDim2.new(0.9, 0, 0, 40)
-webhookBox.Position = UDim2.new(0.05, 0, 0, 50)
-webhookBox.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-webhookBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-webhookBox.Text = CurrentWebhook
-webhookBox.TextXAlignment = Enum.TextXAlignment.Left
-webhookBox.ClearTextOnFocus = false
-webhookBox.TextTruncate = Enum.TextTruncate.AtEnd
-webhookBox.Font = Enum.Font.Gotham
-webhookBox.TextSize = 11
-webhookBox.Parent = setTab
-Instance.new("UICorner", webhookBox).CornerRadius = UDim.new(0, 4)
-Instance.new("UIStroke", webhookBox).Color = Color3.fromRGB(60, 60, 70)
-
-webhookBox.FocusLost:Connect(function()
-    CurrentWebhook = webhookBox.Text
-    print("[Settings] Webhook URL Updated!")
-end)
-
--- ==========================================
--- WEBHOOK & RESTOCK TRACKER
--- ==========================================
-local function sendWebhook(payload)
-    if not fetch or CurrentWebhook == "" then return end
-    pcall(function()
-        fetch({
-            Url = CurrentWebhook,
-            Method = "POST",
-            Headers = { ["Content-Type"] = "application/json" },
-            Body = HttpService:JSONEncode(payload)
-        })
-    end)
-end
-
 local stockSync = ReplicatedStorage:WaitForChild("StockServiceSync")
 stockSync.OnClientEvent:Connect(function(shopId, stockTable)
     local embedsArray = {}
@@ -1116,5 +1153,3 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
     if mentionEveryone then restockPayload.content = "@everyone 🚨 **TARGET ITEM DETECTED & SNIPED!**" end
     sendWebhook(restockPayload)
 end)
-
-sendWebhook({username = "Laba Baby Hub", embeds = {{title = "HETO NA ANG INIWAN", description = "Laba Baby Hub is Online. Toggles are OFF by default.", color = 3447003}}})
