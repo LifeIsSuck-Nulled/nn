@@ -117,7 +117,7 @@ loginTitle.Parent = loginFrame
 
 local webhookDesc = Instance.new("TextLabel")
 webhookDesc.Size = UDim2.new(0.9, 0, 0, 20)
-webhookDesc.Position = UDim2.new(0.05, 0, 45)
+webhookDesc.Position = UDim2.new(0.05, 0, 0, 45)
 webhookDesc.BackgroundTransparency = 1
 webhookDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
 webhookDesc.Text = "Please enter your Discord Webhook URL:"
@@ -176,7 +176,6 @@ mainFrame.Parent = gui
 Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8)
 Instance.new("UIStroke", mainFrame).Color = Color3.fromRGB(60, 60, 70)
 
--- LOGIN BUTTON LOGIC
 launchBtn.MouseButton1Click:Connect(function()
     local inputStr = webhookInput.Text
     if inputStr ~= "" and (inputStr:match("http://") or inputStr:match("https://")) then
@@ -272,7 +271,7 @@ tabButtons["Home"].BackgroundColor3 = Color3.fromRGB(50, 50, 60)
 tabButtons["Home"].TextColor3 = Color3.fromRGB(255, 255, 255)
 
 -- ==========================================
--- STRICT & SECURE SNIPE FUNCTION (NEW)
+-- STRICT & SECURE SNIPE FUNCTION
 -- ==========================================
 local function secureBuy(shopId, itemsToBuy, requiresTP)
     task.spawn(function()
@@ -284,43 +283,9 @@ local function secureBuy(shopId, itemsToBuy, requiresTP)
             if hrp then
                 returnCF = hrp.CFrame
                 hrp.CFrame = ShopCFrame
-                task.wait(1.5) -- BUG FIX: Naghihintay ng 1.5s para mag-register sa server na nasa shop ka na!
+                task.wait(1.5)
             end
             
-            for _, item in ipairs(itemsToBuy) do
-                local attempts = 0
-                local timeout = 20 -- Max 10 seconds per item (20 loops * 0.5s)
-                
-                -- DOUBLE CHECK LOOP
-                while attempts < timeout do
-                    attempts = attempts + 1
-                    local stockData = nil
-                    pcall(function() stockData = StockServiceModule:GetAll(shopId) end)
-                    
-                    local currentStock = (stockData and stockData[item.name]) or 0
-                    
-                    if type(currentStock) == "number" and currentStock > 0 then
-                        pcall(function() ShopPurchaseRemote:FireServer(shopId, item.name, currentStock) end)
-                        task.wait(0.5) -- Delay bago mag-check at bumili ulit
-                    else
-                        -- Stock is 0 or nil, nakuha na natin!
-                        break
-                    end
-                end
-                
-                if attempts >= timeout then
-                    sendDebugLog("❌ **PC PART SNIPE FAILED:** `" .. item.name .. "`\nHindi mabili ang item at na-timeout. Baka na-rate limit, masyadong malayo yung bagsak ng TP, o nagka-restock ulit bago pa matapos ang loop.")
-                end
-            end
-            
-            task.wait(0.5)
-            if hrp and returnCF then
-                hrp.CFrame = returnCF
-                task.wait(0.2)
-            end
-            IsShopping = false
-        else
-            -- Grocery Logic (Walang TP pero may secure double check loop)
             for _, item in ipairs(itemsToBuy) do
                 local attempts = 0
                 local timeout = 20
@@ -341,41 +306,46 @@ local function secureBuy(shopId, itemsToBuy, requiresTP)
                 end
                 
                 if attempts >= timeout then
-                    sendDebugLog("❌ **GROCERY SNIPE FAILED:** `" .. item.name .. "`\nNa-timeout sa pagbili ng pagkain. (Server ignored request).")
+                    sendDebugLog("❌ **PC PART SNIPE FAILED:** `" .. item.name .. "`\nHindi mabili ang item at na-timeout.")
+                end
+            end
+            
+            task.wait(0.5)
+            if hrp and returnCF then
+                hrp.CFrame = returnCF
+                task.wait(0.2)
+            end
+            IsShopping = false
+        else
+            for _, item in ipairs(itemsToBuy) do
+                local attempts = 0
+                local timeout = 20
+                
+                while attempts < timeout do
+                    attempts = attempts + 1
+                    local stockData = nil
+                    pcall(function() stockData = StockServiceModule:GetAll(shopId) end)
+                    
+                    local currentStock = (stockData and stockData[item.name]) or 0
+                    
+                    if type(currentStock) == "number" and currentStock > 0 then
+                        pcall(function() ShopPurchaseRemote:FireServer(shopId, item.name, currentStock) end)
+                        task.wait(0.5)
+                    else
+                        break
+                    end
+                end
+                
+                if attempts >= timeout then
+                    sendDebugLog("❌ **GROCERY SNIPE FAILED:** `" .. item.name .. "`\nNa-timeout sa pagbili ng pagkain.")
                 end
             end
         end
     end)
 end
 
-local function triggerInstantSnipe(shopId, targetDict)
-    task.spawn(function()
-        pcall(function()
-            if StockServiceModule and ShopPurchaseRemote then
-                local currentStock = StockServiceModule:GetAll(shopId)
-                if type(currentStock) == "table" then
-                    local itemsToBuy = {}
-                    for itemName, quantity in pairs(currentStock) do
-                        if type(quantity) == "number" and quantity > 0 and targetDict[itemName] then
-                            table.insert(itemsToBuy, {name = itemName, qty = quantity})
-                        end
-                    end
-                    
-                    if #itemsToBuy > 0 then
-                        if shopId == "PcParts" then
-                            secureBuy(shopId, itemsToBuy, true)
-                        else
-                            secureBuy(shopId, itemsToBuy, false)
-                        end
-                    end
-                end
-            end
-        end)
-    end)
-end
-
 -- ==========================================
--- AUTO EXTINGUISH LOOP 
+-- AUTO EXTINGUISH LOOP (SAFE EQUIP FIX)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -390,35 +360,50 @@ task.spawn(function()
                 if not hrp or not humanoid then return end
                 
                 local fireFound = nil
-                local firePos = nil
+                local firePart = nil
                 local isPrompt = false
                 
                 for _, obj in ipairs(workspace:GetDescendants()) do
                     local name = obj.Name:lower()
                     if obj:IsA("ProximityPrompt") and (name:match("extinguish") or obj.ActionText:lower():match("extinguish") or obj.ObjectText:lower():match("fire")) then
                         fireFound = obj
-                        firePos = obj.Parent.Position
+                        firePart = obj.Parent
                         isPrompt = true
                         break
                     elseif (obj:IsA("ParticleEmitter") or obj:IsA("Fire")) and (name:match("fire") or name:match("flame")) then
                         local part = obj.Parent
                         if part and part:IsA("BasePart") then
                             fireFound = obj
-                            firePos = part.Position
+                            firePart = part
                             break
                         end
                     end
                 end
                 
-                if fireFound and firePos then
-                    if MyCafePos and (firePos - MyCafePos).Magnitude > 200 then return end
+                if fireFound and firePart then
+                    local targetPos = firePart.Position
+                    if MyCafePos and (targetPos - MyCafePos).Magnitude > 200 then return end
                     
+                    -- 1. TELEPORT MUNA BAGO MAG EQUIP
+                    hrp.CFrame = CFrame.new(targetPos) * CFrame.new(0, 3, -4)
+                    task.wait(0.2)
+                    hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(targetPos.X, hrp.Position.Y, targetPos.Z))
+                    task.wait(0.3)
+                    if humanoid then humanoid.Sit = false end
+                    
+                    -- 2. HANAPIN ANG EXTINGUISHER
                     local backpack = player:FindFirstChild("Backpack")
                     local extTool = nil
                     
+                    local function isExtinguisher(t)
+                        if not t:IsA("Tool") then return false end
+                        local n = t.Name:lower()
+                        return n:match("extinguish") or n:match("fire")
+                    end
+                    
                     if backpack then
                         for _, tool in ipairs(backpack:GetChildren()) do
-                            if tool:IsA("Tool") and (tool.Name:lower():match("extinguish") or tool.Name:lower():match("fire")) then
+                            if isExtinguisher(tool) then
                                 extTool = tool
                                 humanoid:EquipTool(tool)
                                 break
@@ -427,18 +412,16 @@ task.spawn(function()
                     end
                     if not extTool and char then
                         for _, tool in ipairs(char:GetChildren()) do
-                            if tool:IsA("Tool") and (tool.Name:lower():match("extinguish") or tool.Name:lower():match("fire")) then
+                            if isExtinguisher(tool) then
                                 extTool = tool
                                 break
                             end
                         end
                     end
                     
-                    hrp.CFrame = CFrame.lookAt(firePos + Vector3.new(0, 0, 4), firePos)
-                    task.wait(0.3)
-                    if humanoid then humanoid.Sit = false end
-                    task.wait(0.3)
+                    task.wait(0.5) -- Bigyan ng oras lumabas sa kamay
                     
+                    -- 3. SPAM CLICK
                     for i = 1, 10 do
                         if extTool then extTool:Activate() end
                         VirtualUser:ClickButton1(Vector2.new())
@@ -462,7 +445,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO CLEAN LOOP (NIGHT ONLY) 
+-- AUTO CLEAN LOOP (SAFE EQUIP & SMART FALLBACK)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -497,12 +480,29 @@ task.spawn(function()
                     if messFound and messPos then
                         if MyCafePos and (messPos - MyCafePos).Magnitude > 200 then return end
                         
+                        -- 1. TELEPORT MUNA BAGO MAG EQUIP
+                        hrp.CFrame = CFrame.new(messPos) * CFrame.new(0, 2.5, 2.5)
+                        task.wait(0.2)
+                        hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(messPos.X, hrp.Position.Y, messPos.Z))
+                        task.wait(0.3)
+                        if humanoid then humanoid.Sit = false end
+                        
+                        -- 2. SMART TOOL DETECTION (WALIS BAGO FIRE EXTINGUISHER)
                         local backpack = player:FindFirstChild("Backpack")
                         local broomTool = nil
                         
-                        local function isBroom(tool)
-                            local n = tool.Name:lower()
-                            return tool:IsA("Tool") and (n:match("broom") or n:match("clean") or n:match("mop") or n:match("sweep"))
+                        local function isBroom(t)
+                            if not t:IsA("Tool") then return false end
+                            local n = t.Name:lower()
+                            -- Priority 1: Kung may keyword na pang-linis
+                            if n:match("broom") or n:match("clean") or n:match("mop") or n:match("sweep") or n:match("brush") then 
+                                return true 
+                            end
+                            -- Priority 2 (Fallback): Kahit anong tool basta HINDI pamatay-sunog
+                            if not n:match("fire") and not n:match("extinguish") then 
+                                return true 
+                            end
+                            return false
                         end
                         
                         if backpack then
@@ -523,12 +523,10 @@ task.spawn(function()
                             end
                         end
                         
-                        hrp.CFrame = CFrame.lookAt(messPos + Vector3.new(0, 0, 4), messPos)
-                        task.wait(0.3)
-                        if humanoid then humanoid.Sit = false end
-                        task.wait(0.3)
+                        task.wait(0.5) -- Bigyan ng oras lumabas sa kamay
                         
-                        for i = 1, 5 do
+                        -- 3. SPAM CLICK
+                        for i = 1, 8 do
                             if broomTool then broomTool:Activate() end
                             VirtualUser:ClickButton1(Vector2.new())
                             
@@ -956,7 +954,6 @@ togglePC.MouseButton1Click:Connect(function()
     if MasterPC then
         togglePC.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
         togglePC.Text = "💻 PC AUTO-BUY: ACTIVE"
-        triggerInstantSnipe("PcParts", TargetItemsPC)
     else
         togglePC.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
         togglePC.Text = "💻 PC AUTO-BUY: OFF"
@@ -968,7 +965,6 @@ toggleGrocery.MouseButton1Click:Connect(function()
     if MasterGrocery then
         toggleGrocery.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
         toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: ACTIVE"
-        triggerInstantSnipe("Grocery", TargetItemsGrocery)
     else
         toggleGrocery.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
         toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: OFF"
@@ -1020,15 +1016,35 @@ toggleClean.MouseButton1Click:Connect(function()
 end)
 
 -- ==========================================
--- DATA PROCESSING (SPLIT PC & GROCERY)
+-- DATA PROCESSING (SMART CPU & MOUSEPAD FIX)
 -- ==========================================
 local guiItemsPC = {}
 local guiItemsGrocery = {}
 local pcCategories = { ["All"] = true }
 
+local knownMousepads = {
+    ["Nocturne"] = true, ["Revv"] = true, ["Shadow"] = true, ["Horizon"] = true, ["Fuji"] = true,
+    ["Petal"] = true, ["Sora"] = true, ["Evergreen"] = true, ["Konoha"] = true, ["Kasumi"] = true,
+    ["Wavy"] = true, ["Hanami"] = true, ["Midnight"] = true, ["Azure"] = true, ["Ripple"] = true,
+    ["Hoshi"] = true, ["Japan"] = true, ["Nimbus"] = true, ["Slate"] = true, ["Collage"] = true
+}
+
+local knownCPUs = {
+    ["Snowdrift"] = true, ["PinkDrift"] = true, ["Dark Nexus"] = true, ["Sakura"] = true,
+    ["Polar X"] = true, ["Voltara"] = true, ["Hexora"] = true, ["Vesta"] = true,
+    ["Trifan-Core"] = true, ["Trifan-Lite"] = true, ["Flat Core"] = true, ["Pulse Core"] = true, ["Classic Core"] = true
+}
+
 if ShopConfig and type(ShopConfig.Items) == "table" then
     for itemName, itemData in pairs(ShopConfig.Items) do
         local cat = itemData.Category or "Other"
+        
+        if knownMousepads[itemName] or itemName:lower():match("mousepad") then
+            cat = "Mousepad"
+        elseif knownCPUs[itemName] or itemName:lower():match("core") or itemName:lower():match("drift") or itemName:lower():match("nexus") or itemName:lower():match("sakura") or itemName:lower():match("polar") or itemName:lower():match("voltara") or itemName:lower():match("hexora") or itemName:lower():match("vesta") or itemName:lower():match("trifan") then
+            cat = "CPU"
+        end
+        
         local itemEntry = {
             name = tostring(itemName),
             category = cat,
@@ -1113,7 +1129,6 @@ local function refreshPCList()
                     TargetItemsPC[item.name] = true
                     btn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
                     btn.Text = " ☑ " .. item.name .. " " .. starDisplay
-                    if MasterPC then triggerInstantSnipe("PcParts", {[item.name] = true}) end
                 end
             end)
         end
@@ -1187,7 +1202,6 @@ for _, item in ipairs(guiItemsGrocery) do
             TargetItemsGrocery[item.name] = true
             btn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
             btn.Text = " ☑ " .. item.name
-            if MasterGrocery then triggerInstantSnipe("Grocery", {[item.name] = true}) end
         end
     end)
 end
