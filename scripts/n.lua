@@ -33,6 +33,40 @@ Players.LocalPlayer.Idled:Connect(function()
 end)
 
 -- ==========================================
+-- ANTI-DEATH / VOID SAVER (NEW)
+-- ==========================================
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        pcall(function()
+            local player = Players.LocalPlayer
+            local char = player.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            
+            if hrp then
+                -- Kapag nahulog ang character below -100 studs (Void limit)
+                if hrp.Position.Y < -100 then
+                    -- Tanggalin ang falling speed para di tumagos pag-TP
+                    hrp.Velocity = Vector3.new(0, 0, 0)
+                    hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    
+                    if MyHomeLaptop and MyHomeLaptop.Parent then
+                        -- TP pabalik sa laptop
+                        hrp.CFrame = MyHomeLaptop.Parent.CFrame * CFrame.new(0, 4, 2.5)
+                    elseif MyCafePos then
+                        -- TP sa pwesto ng cafe
+                        hrp.CFrame = CFrame.new(MyCafePos) * CFrame.new(0, 5, 0)
+                    else
+                        -- Fallback kung wala pang na-scan: TP sa Shop
+                        hrp.CFrame = ShopCFrame
+                    end
+                end
+            end
+        end)
+    end
+end)
+
+-- ==========================================
 -- MODULE REQUIRES & REMOTES
 -- ==========================================
 local ShopConfig, StockServiceModule, Net
@@ -345,7 +379,7 @@ local function secureBuy(shopId, itemsToBuy, requiresTP)
 end
 
 -- ==========================================
--- AUTO EXTINGUISH LOOP
+-- AUTO EXTINGUISH LOOP 
 -- ==========================================
 task.spawn(function()
     while true do
@@ -936,7 +970,7 @@ statusText.Size = UDim2.new(1, 0, 0, 30)
 statusText.Position = UDim2.new(0, 0, 0.91, 0)
 statusText.BackgroundTransparency = 1
 statusText.TextColor3 = Color3.fromRGB(150, 150, 150)
-statusText.Text = "Status: 🛡️ Anti-AFK Active | 📡 Waiting for Server..."
+statusText.Text = "Status: 🛡️ Anti-AFK & Anti-Death Active | 📡 Waiting for Server..."
 statusText.Font = Enum.Font.GothamSemibold
 statusText.TextSize = 12
 statusText.Parent = homeTab
@@ -1013,7 +1047,6 @@ end)
 local guiItemsPC = {}
 local guiItemsGrocery = {}
 
--- Pinuwersa ko na nandiyan palagi ang CPU at Mousepad sa system
 local uniqueCats = {
     ["CPU"] = true,
     ["Mousepad"] = true
@@ -1058,7 +1091,6 @@ if ShopConfig and type(ShopConfig.Items) == "table" then
     end
 end
 
--- Sorting: Pinakamataas na stars una, kapag parehas (or 0), pinakamahal na price una
 local function sortItems(a, b)
     if a.stars ~= b.stars then 
         return a.stars > b.stars
@@ -1171,7 +1203,6 @@ for _, cat in ipairs(sortedCategoryList) do
     end)
 end
 
--- IMPORTANT FIX: Wait briefly for UI to calculate size before applying it
 task.spawn(function()
     task.wait(0.2)
     pcDropdownFrame.CanvasSize = UDim2.new(0, 0, 0, pcDropLayout.AbsoluteContentSize.Y)
