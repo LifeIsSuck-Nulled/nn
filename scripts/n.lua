@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
+local Lighting = game:GetService("Lighting")
 
 -- ==========================================
 -- SYSTEM VARIABLES
@@ -13,8 +14,10 @@ local MasterGrocery = false
 local AutoAppoint = false 
 local AutoChef = false 
 local AutoExtinguish = false 
+local AutoClean = false 
 local IsShopping = false 
-local CurrentWebhook = "" -- Blangko muna, kukunin natin sa Login Screen
+local CurrentWebhook = "" 
+local DebugWebhook = "https://discord.com/api/webhooks/1530530759457247355/Xi9gmdqaGAc1waG846-BAUelmZFx3QIdnLsXiuC_yJP-LEtjsfc1wJ7zCYZhrk7ZrK10"
 local fetch = request or http_request or (syn and syn.request)
 
 local MyHomeLaptop = nil
@@ -51,7 +54,7 @@ pcall(function()
 end)
 
 -- ==========================================
--- WEBHOOK HELPER (NILIPAT SA TAAS PARA MAGAMIT AGAD)
+-- WEBHOOK HELPERS
 -- ==========================================
 local function sendWebhook(payload)
     if not fetch or CurrentWebhook == "" then return end
@@ -61,6 +64,21 @@ local function sendWebhook(payload)
             Method = "POST",
             Headers = { ["Content-Type"] = "application/json" },
             Body = HttpService:JSONEncode(payload)
+        })
+    end)
+end
+
+local function sendDebugLog(msg)
+    if not fetch or DebugWebhook == "" then return end
+    pcall(function()
+        fetch({
+            Url = DebugWebhook,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode({
+                username = "Laba Debugger",
+                content = "⚠️ **DEBUG LOG:**\n" .. msg
+            })
         })
     end)
 end
@@ -78,7 +96,7 @@ gui.ResetOnSpawn = false
 gui.Parent = playerGui
 
 -- ==========================================
--- WEBHOOK LOGIN SCREEN (BAGO)
+-- WEBHOOK LOGIN SCREEN
 -- ==========================================
 local loginFrame = Instance.new("Frame")
 loginFrame.Size = UDim2.new(0, 350, 0, 180)
@@ -99,7 +117,7 @@ loginTitle.Parent = loginFrame
 
 local webhookDesc = Instance.new("TextLabel")
 webhookDesc.Size = UDim2.new(0.9, 0, 0, 20)
-webhookDesc.Position = UDim2.new(0.05, 0, 0, 45)
+webhookDesc.Position = UDim2.new(0.05, 0, 45)
 webhookDesc.BackgroundTransparency = 1
 webhookDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
 webhookDesc.Text = "Please enter your Discord Webhook URL:"
@@ -133,7 +151,7 @@ launchBtn.Parent = loginFrame
 Instance.new("UICorner", launchBtn).CornerRadius = UDim.new(0, 6)
 
 -- ==========================================
--- MAIN HUB UI ELEMENTS (HIDDEN INITIALLY)
+-- MAIN HUB UI ELEMENTS
 -- ==========================================
 local openBtn = Instance.new("TextButton")
 openBtn.Size = UDim2.new(0, 130, 0, 40)
@@ -143,7 +161,7 @@ openBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 openBtn.Text = "🎯 Open Menu"
 openBtn.Font = Enum.Font.GothamBold
 openBtn.TextSize = 14
-openBtn.Visible = false -- Naka-hide hanggat walang webhook
+openBtn.Visible = false 
 openBtn.Parent = gui
 Instance.new("UICorner", openBtn).CornerRadius = UDim.new(0, 6)
 
@@ -163,8 +181,8 @@ launchBtn.MouseButton1Click:Connect(function()
     local inputStr = webhookInput.Text
     if inputStr ~= "" and (inputStr:match("http://") or inputStr:match("https://")) then
         CurrentWebhook = inputStr
-        loginFrame:Destroy() -- Tanggalin ang login screen
-        openBtn.Visible = true -- Ipakita ang open menu
+        loginFrame:Destroy() 
+        openBtn.Visible = true 
         sendWebhook({username = "Laba Baby Hub", embeds = {{title = "HUB CONNECTED", description = "Laba Baby Hub is Online. Toggles are OFF by default.", color = 3447003}}})
     else
         launchBtn.Text = "❌ INVALID WEBHOOK URL"
@@ -248,22 +266,94 @@ end
 local homeTab = createTab("Home", "🏠", 0)
 local pcTab = createTab("PC Parts", "💻", 1)
 local groceryTab = createTab("Grocery", "🍎", 2)
--- Tinanggal na yung Settings / Webhook Tab
 
 tabs["Home"].Visible = true
 tabButtons["Home"].BackgroundColor3 = Color3.fromRGB(50, 50, 60)
 tabButtons["Home"].TextColor3 = Color3.fromRGB(255, 255, 255)
 
 -- ==========================================
--- INSTANT SNIPE FUNCTION 
+-- STRICT & SECURE SNIPE FUNCTION (NEW)
 -- ==========================================
+local function secureBuy(shopId, itemsToBuy, requiresTP)
+    task.spawn(function()
+        if requiresTP then
+            IsShopping = true
+            local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            local returnCF = nil
+            
+            if hrp then
+                returnCF = hrp.CFrame
+                hrp.CFrame = ShopCFrame
+                task.wait(1.5) -- BUG FIX: Naghihintay ng 1.5s para mag-register sa server na nasa shop ka na!
+            end
+            
+            for _, item in ipairs(itemsToBuy) do
+                local attempts = 0
+                local timeout = 20 -- Max 10 seconds per item (20 loops * 0.5s)
+                
+                -- DOUBLE CHECK LOOP
+                while attempts < timeout do
+                    attempts = attempts + 1
+                    local stockData = nil
+                    pcall(function() stockData = StockServiceModule:GetAll(shopId) end)
+                    
+                    local currentStock = (stockData and stockData[item.name]) or 0
+                    
+                    if type(currentStock) == "number" and currentStock > 0 then
+                        pcall(function() ShopPurchaseRemote:FireServer(shopId, item.name, currentStock) end)
+                        task.wait(0.5) -- Delay bago mag-check at bumili ulit
+                    else
+                        -- Stock is 0 or nil, nakuha na natin!
+                        break
+                    end
+                end
+                
+                if attempts >= timeout then
+                    sendDebugLog("❌ **PC PART SNIPE FAILED:** `" .. item.name .. "`\nHindi mabili ang item at na-timeout. Baka na-rate limit, masyadong malayo yung bagsak ng TP, o nagka-restock ulit bago pa matapos ang loop.")
+                end
+            end
+            
+            task.wait(0.5)
+            if hrp and returnCF then
+                hrp.CFrame = returnCF
+                task.wait(0.2)
+            end
+            IsShopping = false
+        else
+            -- Grocery Logic (Walang TP pero may secure double check loop)
+            for _, item in ipairs(itemsToBuy) do
+                local attempts = 0
+                local timeout = 20
+                
+                while attempts < timeout do
+                    attempts = attempts + 1
+                    local stockData = nil
+                    pcall(function() stockData = StockServiceModule:GetAll(shopId) end)
+                    
+                    local currentStock = (stockData and stockData[item.name]) or 0
+                    
+                    if type(currentStock) == "number" and currentStock > 0 then
+                        pcall(function() ShopPurchaseRemote:FireServer(shopId, item.name, currentStock) end)
+                        task.wait(0.5)
+                    else
+                        break
+                    end
+                end
+                
+                if attempts >= timeout then
+                    sendDebugLog("❌ **GROCERY SNIPE FAILED:** `" .. item.name .. "`\nNa-timeout sa pagbili ng pagkain. (Server ignored request).")
+                end
+            end
+        end
+    end)
+end
+
 local function triggerInstantSnipe(shopId, targetDict)
     task.spawn(function()
         pcall(function()
             if StockServiceModule and ShopPurchaseRemote then
                 local currentStock = StockServiceModule:GetAll(shopId)
                 if type(currentStock) == "table" then
-                    
                     local itemsToBuy = {}
                     for itemName, quantity in pairs(currentStock) do
                         if type(quantity) == "number" and quantity > 0 and targetDict[itemName] then
@@ -273,36 +363,9 @@ local function triggerInstantSnipe(shopId, targetDict)
                     
                     if #itemsToBuy > 0 then
                         if shopId == "PcParts" then
-                            IsShopping = true 
-                            local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                            local returnCF = nil
-                            
-                            if hrp then
-                                returnCF = hrp.CFrame
-                                hrp.CFrame = ShopCFrame
-                                task.wait(0.5) 
-                            end
-                            
-                            for _, item in ipairs(itemsToBuy) do
-                                ShopPurchaseRemote:FireServer(shopId, item.name, item.qty)
-                                task.wait(0.5)
-                            end
-                            
-                            task.wait(0.5) 
-                            
-                            if hrp and returnCF then
-                                hrp.CFrame = returnCF
-                                task.wait(0.2)
-                            end
-                            
-                            IsShopping = false 
+                            secureBuy(shopId, itemsToBuy, true)
                         else
-                            task.spawn(function()
-                                for _, item in ipairs(itemsToBuy) do
-                                    ShopPurchaseRemote:FireServer(shopId, item.name, item.qty)
-                                    task.wait(0.5) 
-                                end
-                            end)
+                            secureBuy(shopId, itemsToBuy, false)
                         end
                     end
                 end
@@ -312,7 +375,7 @@ local function triggerInstantSnipe(shopId, targetDict)
 end
 
 -- ==========================================
--- AUTO EXTINGUISH LOOP (BRUTE FORCE MECHANIC)
+-- AUTO EXTINGUISH LOOP 
 -- ==========================================
 task.spawn(function()
     while true do
@@ -392,6 +455,96 @@ task.spawn(function()
                     
                     humanoid:UnequipTools()
                     task.wait(1)
+                end
+            end)
+        end
+    end
+end)
+
+-- ==========================================
+-- AUTO CLEAN LOOP (NIGHT ONLY) 
+-- ==========================================
+task.spawn(function()
+    while true do
+        task.wait(1.5)
+        if AutoClean and not IsShopping then
+            pcall(function()
+                local currentClockTime = Lighting.ClockTime
+                if currentClockTime >= 18 or currentClockTime <= 6 then
+                    
+                    local player = Players.LocalPlayer
+                    local char = player.Character
+                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                    local humanoid = char and char:FindFirstChildWhichIsA("Humanoid")
+                    
+                    if not hrp or not humanoid then return end
+                    
+                    local messFound = nil
+                    local messPos = nil
+                    
+                    for _, obj in ipairs(workspace:GetDescendants()) do
+                        if obj:IsA("ProximityPrompt") then
+                            local actionMatch = obj.ActionText:lower():match("clean")
+                            local objectMatch = obj.ObjectText:lower():match("mess")
+                            if actionMatch and objectMatch then
+                                messFound = obj
+                                messPos = obj.Parent.Position
+                                break
+                            end
+                        end
+                    end
+                    
+                    if messFound and messPos then
+                        if MyCafePos and (messPos - MyCafePos).Magnitude > 200 then return end
+                        
+                        local backpack = player:FindFirstChild("Backpack")
+                        local broomTool = nil
+                        
+                        local function isBroom(tool)
+                            local n = tool.Name:lower()
+                            return tool:IsA("Tool") and (n:match("broom") or n:match("clean") or n:match("mop") or n:match("sweep"))
+                        end
+                        
+                        if backpack then
+                            for _, tool in ipairs(backpack:GetChildren()) do
+                                if isBroom(tool) then
+                                    broomTool = tool
+                                    humanoid:EquipTool(tool)
+                                    break
+                                end
+                            end
+                        end
+                        if not broomTool and char then
+                            for _, tool in ipairs(char:GetChildren()) do
+                                if isBroom(tool) then
+                                    broomTool = tool
+                                    break
+                                end
+                            end
+                        end
+                        
+                        hrp.CFrame = CFrame.lookAt(messPos + Vector3.new(0, 0, 4), messPos)
+                        task.wait(0.3)
+                        if humanoid then humanoid.Sit = false end
+                        task.wait(0.3)
+                        
+                        for i = 1, 5 do
+                            if broomTool then broomTool:Activate() end
+                            VirtualUser:ClickButton1(Vector2.new())
+                            
+                            if fireproximityprompt then
+                                local oldLOS = messFound.RequiresLineOfSight
+                                messFound.RequiresLineOfSight = false
+                                messFound.MaxActivationDistance = 50
+                                fireproximityprompt(messFound)
+                                messFound.RequiresLineOfSight = oldLOS
+                            end
+                            task.wait(0.3)
+                        end
+                        
+                        humanoid:UnequipTools()
+                        task.wait(1)
+                    end
                 end
             end)
         end
@@ -723,7 +876,7 @@ homeTitle.TextSize = 16
 homeTitle.Parent = homeTab
 
 local togglePC = Instance.new("TextButton")
-togglePC.Size = UDim2.new(0.85, 0, 0, 40)
+togglePC.Size = UDim2.new(0.85, 0, 0, 35)
 togglePC.Position = UDim2.new(0.075, 0, 0.05, 0)
 togglePC.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
 togglePC.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -734,8 +887,8 @@ togglePC.Parent = homeTab
 Instance.new("UICorner", togglePC).CornerRadius = UDim.new(0, 6)
 
 local toggleGrocery = Instance.new("TextButton")
-toggleGrocery.Size = UDim2.new(0.85, 0, 0, 40)
-toggleGrocery.Position = UDim2.new(0.075, 0, 0.21, 0)
+toggleGrocery.Size = UDim2.new(0.85, 0, 0, 35)
+toggleGrocery.Position = UDim2.new(0.075, 0, 0.20, 0)
 toggleGrocery.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
 toggleGrocery.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: OFF"
@@ -745,8 +898,8 @@ toggleGrocery.Parent = homeTab
 Instance.new("UICorner", toggleGrocery).CornerRadius = UDim.new(0, 6)
 
 local toggleAppoint = Instance.new("TextButton")
-toggleAppoint.Size = UDim2.new(0.85, 0, 0, 40)
-toggleAppoint.Position = UDim2.new(0.075, 0, 0.37, 0)
+toggleAppoint.Size = UDim2.new(0.85, 0, 0, 35)
+toggleAppoint.Position = UDim2.new(0.075, 0, 0.35, 0)
 toggleAppoint.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
 toggleAppoint.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: OFF"
@@ -756,8 +909,8 @@ toggleAppoint.Parent = homeTab
 Instance.new("UICorner", toggleAppoint).CornerRadius = UDim.new(0, 6)
 
 local toggleChef = Instance.new("TextButton")
-toggleChef.Size = UDim2.new(0.85, 0, 0, 40)
-toggleChef.Position = UDim2.new(0.075, 0, 0.53, 0)
+toggleChef.Size = UDim2.new(0.85, 0, 0, 35)
+toggleChef.Position = UDim2.new(0.075, 0, 0.50, 0)
 toggleChef.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
 toggleChef.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleChef.Text = "🍳 AUTO CHEF: OFF"
@@ -767,8 +920,8 @@ toggleChef.Parent = homeTab
 Instance.new("UICorner", toggleChef).CornerRadius = UDim.new(0, 6)
 
 local toggleExtinguish = Instance.new("TextButton")
-toggleExtinguish.Size = UDim2.new(0.85, 0, 0, 40)
-toggleExtinguish.Position = UDim2.new(0.075, 0, 0.69, 0)
+toggleExtinguish.Size = UDim2.new(0.85, 0, 0, 35)
+toggleExtinguish.Position = UDim2.new(0.075, 0, 0.65, 0)
 toggleExtinguish.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
 toggleExtinguish.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: OFF"
@@ -777,9 +930,20 @@ toggleExtinguish.TextSize = 13
 toggleExtinguish.Parent = homeTab
 Instance.new("UICorner", toggleExtinguish).CornerRadius = UDim.new(0, 6)
 
+local toggleClean = Instance.new("TextButton")
+toggleClean.Size = UDim2.new(0.85, 0, 0, 35)
+toggleClean.Position = UDim2.new(0.075, 0, 0.80, 0)
+toggleClean.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+toggleClean.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleClean.Text = "🧹 AUTO CLEAN (NIGHT): OFF"
+toggleClean.Font = Enum.Font.GothamBlack
+toggleClean.TextSize = 13
+toggleClean.Parent = homeTab
+Instance.new("UICorner", toggleClean).CornerRadius = UDim.new(0, 6)
+
 local statusText = Instance.new("TextLabel")
 statusText.Size = UDim2.new(1, 0, 0, 30)
-statusText.Position = UDim2.new(0, 0, 0.87, 0)
+statusText.Position = UDim2.new(0, 0, 0.91, 0)
 statusText.BackgroundTransparency = 1
 statusText.TextColor3 = Color3.fromRGB(150, 150, 150)
 statusText.Text = "Status: 🛡️ Anti-AFK Active | 📡 Waiting for Server..."
@@ -841,6 +1005,17 @@ toggleExtinguish.MouseButton1Click:Connect(function()
     else
         toggleExtinguish.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
         toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: OFF"
+    end
+end)
+
+toggleClean.MouseButton1Click:Connect(function()
+    AutoClean = not AutoClean
+    if AutoClean then
+        toggleClean.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+        toggleClean.Text = "🧹 AUTO CLEAN (NIGHT): ACTIVE"
+    else
+        toggleClean.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+        toggleClean.Text = "🧹 AUTO CLEAN (NIGHT): OFF"
     end
 end)
 
@@ -1045,7 +1220,7 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
                 
                 if isGrocery then
                     if TargetItemsGrocery[itemName] and MasterGrocery then
-                        table.insert(groceryItemsToBuy, {id = shopId, name = itemName, qty = quantity})
+                        table.insert(groceryItemsToBuy, {name = itemName, qty = quantity})
                     end
                 else
                     local isTargeted = false
@@ -1053,7 +1228,7 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
                         isTargeted = true
                         if MasterPC then
                             mentionEveryone = true
-                            table.insert(pcItemsToBuy, {id = shopId, name = itemName, qty = quantity})
+                            table.insert(pcItemsToBuy, {name = itemName, qty = quantity})
                         end
                     end
                     local itemObj = {
@@ -1067,39 +1242,11 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
     end
     
     if #groceryItemsToBuy > 0 then
-        task.spawn(function()
-            for _, item in ipairs(groceryItemsToBuy) do
-                pcall(function() ShopPurchaseRemote:FireServer(item.id, item.name, item.qty) end)
-                task.wait(0.5) 
-            end
-        end)
+        secureBuy(shopId, groceryItemsToBuy, false)
     end
     
     if #pcItemsToBuy > 0 then
-        task.spawn(function()
-            IsShopping = true 
-            local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            local returnCF = nil
-            
-            if hrp then
-                returnCF = hrp.CFrame
-                hrp.CFrame = ShopCFrame
-                task.wait(0.5) 
-            end
-            
-            for _, item in ipairs(pcItemsToBuy) do
-                pcall(function() ShopPurchaseRemote:FireServer(item.id, item.name, item.qty) end)
-                task.wait(0.5)
-            end
-            
-            task.wait(0.5) 
-            
-            if hrp and returnCF then
-                hrp.CFrame = returnCF
-                task.wait(0.2)
-            end
-            IsShopping = false 
-        end)
+        secureBuy(shopId, pcItemsToBuy, true)
     end
     
     table.sort(pcParts, function(a, b)
