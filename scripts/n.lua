@@ -12,15 +12,12 @@ local MasterPC = false
 local MasterGrocery = false 
 local AutoAppoint = false 
 local AutoChef = false 
-local IsShopping = false -- TASK LOCK PARA HINDI MAG-AGAWAN SA TELEPORT
+local IsShopping = false 
 local CurrentWebhook = "https://webhook.lewisakura.moe/api/webhooks/1530035274422161498/OxDOGd_v9FeYoou_JeSI1odFo_Wfj1oj3V5Hv1QFoRtewlihYIYdiO2DX16YtZVIyO-7"
 local fetch = request or http_request or (syn and syn.request)
 
--- CAFE MEMORY LOCK
 local MyHomeLaptop = nil
 local MyCafePos = nil
-
--- Shop Coordinates para sa Auto-Buy TP
 local ShopCFrame = CFrame.new(-240.48721313476562, 7.888942718505859, 136.32080078125)
 
 -- ==========================================
@@ -50,12 +47,16 @@ pcall(function()
     CookEvent = Net:RemoteEvent("CookEvent")
     DeliverEvent = Net:RemoteEvent("DeliverEvent")
     SelectTrayOrder = Net:RemoteEvent("SelectTrayOrder")
-    
-    -- ADMIN EXPLOIT REMOTE
-    local impEvents = ReplicatedStorage:FindFirstChild("IMPORTANT_REMOTE_EVENTS")
-    if impEvents then
-        AdminRemote = impEvents:FindFirstChild("AdminMoneyTest")
-    end
+end)
+
+-- Tinitiyak na mahihintay talaga ang Admin Folder kahit mabagal ang laro
+task.spawn(function()
+    pcall(function()
+        local impEvents = ReplicatedStorage:WaitForChild("IMPORTANT_REMOTE_EVENTS", 10)
+        if impEvents then
+            AdminRemote = impEvents:WaitForChild("AdminMoneyTest", 10)
+        end
+    end)
 end)
 
 -- ==========================================
@@ -190,7 +191,7 @@ local function triggerInstantSnipe(shopId, targetDict)
                     end
                     
                     if #itemsToBuy > 0 then
-                        IsShopping = true -- I-PAUSE ANG IBANG TASKS
+                        IsShopping = true 
                         local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
                         local returnCF = nil
                         
@@ -211,7 +212,7 @@ local function triggerInstantSnipe(shopId, targetDict)
                             task.wait(0.2)
                         end
                         
-                        IsShopping = false -- I-RESUME ANG MGA TASKS
+                        IsShopping = false 
                     end
                 end
             end
@@ -325,7 +326,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO CHEF (WITH CAFE MEMORY LOCK & SHOP PAUSE)
+-- AUTO CHEF 
 -- ==========================================
 task.spawn(function()
     while true do
@@ -855,7 +856,7 @@ webhookBox.FocusLost:Connect(function()
 end)
 
 -- ==========================================
--- ⚡ ADMIN TAB CONTENT
+-- ⚡ ADMIN TAB CONTENT (FIXED REMOTES)
 -- ==========================================
 local adminHeader = Instance.new("TextLabel")
 adminHeader.Size = UDim2.new(0.9, 0, 0, 30)
@@ -902,21 +903,41 @@ btnSetMoney.TextSize = 12
 btnSetMoney.Parent = adminTab
 Instance.new("UICorner", btnSetMoney).CornerRadius = UDim.new(0, 4)
 
+local btnGiveMoney = Instance.new("TextButton")
+btnGiveMoney.Size = UDim2.new(0.9, 0, 0, 35)
+btnGiveMoney.Position = UDim2.new(0.05, 0, 0, 180)
+btnGiveMoney.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+btnGiveMoney.TextColor3 = Color3.fromRGB(255, 255, 255)
+btnGiveMoney.Text = "🎁 Give Money"
+btnGiveMoney.Font = Enum.Font.GothamBold
+btnGiveMoney.TextSize = 12
+btnGiveMoney.Parent = adminTab
+Instance.new("UICorner", btnGiveMoney).CornerRadius = UDim.new(0, 4)
+
 local function fireAdmin(command)
+    -- Kung hindi nakuha sa initialization, i-try ulit kunin
+    if not AdminRemote then
+        pcall(function()
+            local impEvents = ReplicatedStorage:WaitForChild("IMPORTANT_REMOTE_EVENTS", 3)
+            if impEvents then AdminRemote = impEvents:WaitForChild("AdminMoneyTest", 3) end
+        end)
+    end
+    
     if AdminRemote then
         local amt = tonumber(amountBox.Text) or 1000000
-        -- Multi-fire para siguradong tumama sa hinihinging argument ng server
+        -- I-blast lahat ng possible arguments baka sakaling isa doon ang tatanggapin
         pcall(function() AdminRemote:FireServer(command, amt) end)
         pcall(function() AdminRemote:FireServer(command, Players.LocalPlayer, amt) end)
         pcall(function() AdminRemote:FireServer(command, Players.LocalPlayer.Name, amt) end)
-        print("[LABA BABY HUB] Fired Admin Event: " .. command)
+        print("[LABA BABY HUB] Fired Admin Event: " .. command .. " for " .. tostring(amt))
     else
-        warn("[LABA BABY HUB] Admin Remote not found!")
+        warn("[LABA BABY HUB] Admin Remote not found or deleted by server!")
     end
 end
 
 btnAddCash.MouseButton1Click:Connect(function() fireAdmin("AddCash") end)
 btnSetMoney.MouseButton1Click:Connect(function() fireAdmin("SetMoney") end)
+btnGiveMoney.MouseButton1Click:Connect(function() fireAdmin("GiveMoney") end)
 
 -- ==========================================
 -- WEBHOOK & RESTOCK TRACKER (WITH LOCK & TP)
