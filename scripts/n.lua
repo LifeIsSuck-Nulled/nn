@@ -297,11 +297,11 @@ task.spawn(function()
                 
                 if messFound and messPos then
                     IsBusy = true 
-                    humanoid:UnequipTools(); task.wait(0.3) -- Bigyan ng oras bumitaw
+                    humanoid:UnequipTools(); task.wait(0.3) 
                     hrp.CFrame = CFrame.lookAt(messPos + Vector3.new(0, 2.5, 2.5), messPos); task.wait(0.3)
                     if humanoid then humanoid.Sit = false end
                     
-                    -- 🔥 SMARTER TOOL SELECTOR (Para hindi bumunot ng fire extinguisher)
+                    -- 🔥 SMARTER TOOL SELECTOR
                     local allowedTools = (messType == "glass") and {"towel", "sponge", "wipe", "rag"} or {"walis", "broom", "mop", "sweep"}
                     local toolToEquip = nil
                     local backpack = Players.LocalPlayer:FindFirstChild("Backpack")
@@ -455,4 +455,99 @@ task.spawn(function()
                     
                     local pcLabel = equippedItem:FindFirstChild("PcNumber")
                     if pcLabel then
-                        local targetPCNumber = pcLabel.Text
+                        local targetPCNumber = pcLabel.Text:match("%d+")
+                        if targetPCNumber then
+                            refreshCafePosition()
+                            if not MyCafePos then return end
+                            local foundPC, shortestDist = nil, 400 
+                            
+                            for _, obj in ipairs(workspace:GetDescendants()) do
+                                if obj:IsA("Model") or obj:IsA("Folder") or obj:IsA("BasePart") then
+                                    local rawName = obj.Name:lower():gsub("%s+", ""):gsub("_", "")
+                                    local isMatch = false
+                                    if rawName == targetPCNumber then isMatch = true
+                                    else
+                                        for _, prefix in ipairs({"pc", "desk", "table", "computer"}) do
+                                            if rawName == prefix .. targetPCNumber then isMatch = true break end
+                                        end
+                                    end
+                                    
+                                    if isMatch then
+                                        local pos = obj:IsA("BasePart") and obj.Position or (obj:IsA("Model") and (obj.PrimaryPart and obj.PrimaryPart.Position or obj:GetModelCFrame().Position))
+                                        if pos and isInsideMyBase(pos) then
+                                            local dist = (hrp.Position - pos).Magnitude
+                                            if dist < shortestDist then shortestDist = dist; foundPC = obj end
+                                        end
+                                    end
+                                end
+                            end
+                            
+                            if foundPC and not IsShopping then
+                                IsBusy = true
+                                local pcPos = foundPC:IsA("BasePart") and foundPC.Position or (foundPC:IsA("Model") and (foundPC.PrimaryPart and foundPC.PrimaryPart.Position or foundPC:GetModelCFrame().Position))
+                                local targetNPC, closestNPCDist = nil, 15
+                                
+                                for _, model in ipairs(workspace:GetDescendants()) do
+                                    if model:IsA("Model") and model:FindFirstChild("Humanoid") and not Players:GetPlayerFromCharacter(model) then
+                                        local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+                                        if root then
+                                            local dist = (root.Position - pcPos).Magnitude
+                                            if dist < closestNPCDist then closestNPCDist = dist; targetNPC = model end
+                                        end
+                                    end
+                                end
+                                
+                                if targetNPC then
+                                    local npcRoot = targetNPC:FindFirstChild("HumanoidRootPart") or targetNPC.PrimaryPart
+                                    hrp.CFrame = CFrame.lookAt((npcRoot.CFrame * CFrame.new(0, 0, 3.5)).Position + Vector3.new(0, 2.5, 0), npcRoot.Position)
+                                else hrp.CFrame = CFrame.new(pcPos) * CFrame.new(0, 3, -4) end
+                                
+                                task.wait(0.2)
+                                if humanoid then humanoid.Sit = false end
+                                task.wait(0.3)
+                                
+                                for _, prompt in ipairs(workspace:GetDescendants()) do
+                                    if prompt:IsA("ProximityPrompt") and prompt.Parent and prompt.Parent:IsA("BasePart") then
+                                        if (prompt.Parent.Position - hrp.Position).Magnitude < 15 then
+                                            local a, o = prompt.ActionText:lower(), prompt.ObjectText:lower()
+                                            if not a:match("sit") and not o:match("chair") and not o:match("seat") then forceFirePrompt(prompt) end
+                                        end
+                                    end
+                                end
+                                task.wait(1)
+                                IsBusy = false
+                            end
+                        end
+                    end
+                end
+                
+                if #trayItems < 3 and not IsShopping then
+                    local function clearOrders(frameName, cardAttr, remote, isCook)
+                        local frame = mainUi:FindFirstChild(isCook and "Cooking" or frameName)
+                        frame = frame and frame:FindFirstChild(isCook and "OrdersFrame" or "OrdersFrame") or (not isCook and mainUi:FindFirstChild(frameName) and mainUi[frameName]:FindFirstChild("OrdersFrame")) or (isCook and mainUi:FindFirstChild("Cooking") and mainUi.Cooking:FindFirstChild("PreparingFrame"))
+                        if frame then
+                            for _, v in ipairs(frame:GetChildren()) do
+                                if v:IsA("Frame") and v:GetAttribute(cardAttr) then
+                                    if isCook == "Prep" then
+                                        local btn = v:FindFirstChild("Button", true)
+                                        if btn and btn.Text == "Deliver" and remote then remote:FireServer(tonumber(v.Name) or v.Name); task.wait(0.5); return true end
+                                    elseif isCook == "Cook" then
+                                        local foodLbl = v:FindFirstChild("FoodName", true)
+                                        if foodLbl and remote then remote:FireServer(foodLbl.Text, tonumber(v.Name) or v.Name); task.wait(0.5); return true end
+                                    else
+                                        if remote then remote:FireServer(tonumber(v.Name) or v.Name); task.wait(0.5); return true end
+                                    end
+                                end
+                            end
+                        end
+                        return false
+                    end
+                    
+                    if clearOrders("Cooking", "CookingRuntimeCard", DeliverEvent, "Prep") then return end
+                    if clearOrders("SnacksDeliver", "SnackRuntimeCard", DeliverEvent, false) then return end
+                    if clearOrders("Cooking", "CookingRuntimeCard", CookEvent, "Cook") then return end
+                end
+            end)
+        end
+    end
+end)
