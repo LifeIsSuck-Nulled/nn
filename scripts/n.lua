@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local Lighting = game:GetService("Lighting")
 
 -- ==========================================
@@ -27,7 +28,7 @@ local fetch = request or http_request or (syn and syn.request)
 
 local MyCafePos = nil
 local CurrentTargetPCName = "Unknown PC"
-local UpgradeLock = false -- 🔥 BAGONG SYSTEM PARA HINDI MAG-OVERLAP
+local UpgradeLock = false 
 
 local ShopCFrame_PC = CFrame.new(-240.48721313476562, 7.888942718505859, 136.32080078125)
 local ShopCFrame_Grocery = CFrame.new(-102.66999816894531, 8.224592208862305, 10.839996337890625)
@@ -168,29 +169,28 @@ local function sendUpgradeWebhook(pcName, upgradesList)
     end)
 end
 
+-- 🔥 HARDWARE KEYBOARD SIMULATION BYPASS
 local function forceFirePrompt(prompt)
     if not prompt or not prompt:IsA("ProximityPrompt") then return end
     pcall(function()
-        local oldDist = prompt.MaxActivationDistance
-        local oldLOS = prompt.RequiresLineOfSight
-        prompt.MaxActivationDistance = 9999
         prompt.RequiresLineOfSight = false
         
+        -- Method 1: Executor Bypass
         if fireproximityprompt then
-            fireproximityprompt(prompt, 0)
-            fireproximityprompt(prompt, 1)
-            fireproximityprompt(prompt)
-        end
-        if prompt.InputHoldBegin then
-            prompt:InputHoldBegin()
-            task.wait(0.1)
-            prompt:InputHoldEnd()
+            pcall(function() fireproximityprompt(prompt) end)
         end
         
-        task.delay(1, function()
-            prompt.MaxActivationDistance = oldDist
-            prompt.RequiresLineOfSight = oldLOS
-        end)
+        -- Method 2: Internal Trigger Bypass
+        if prompt.InputHoldBegin then
+            pcall(function() prompt:InputHoldBegin() end)
+            task.delay(0.2, function() pcall(function() prompt:InputHoldEnd() end) end)
+        end
+        
+        -- Method 3: HARDWARE KEYBOARD SIMULATION (100% Undetected)
+        local key = prompt.KeyboardKeyCode or Enum.KeyCode.E
+        VirtualInputManager:SendKeyEvent(true, key, false, game)
+        task.wait(0.2)
+        VirtualInputManager:SendKeyEvent(false, key, false, game)
     end)
 end
 
@@ -211,7 +211,13 @@ if CustomizeRemote then
     CustomizeRemote.OnClientEvent:Connect(function(pcModel, inventory)
         if not AutoUpgrade or typeof(inventory) ~= "table" or not pcModel then return end
         
+        if _G.IsUpgradingPC then return end
+        _G.IsUpgradingPC = true
+        
         task.spawn(function()
+            -- 🔥 BIG FIX: Maghihintay ng 1 second para siguradong nakabukas na yung UI sa screen mo bago umaksyon
+            task.wait(1)
+            
             local hasChanges = false
             local currentEquipped = {}
             local upgradesDone = {}
@@ -249,7 +255,7 @@ if CustomizeRemote then
                     pcall(function() CustomizeRemote:FireServer(cat, best.Name) end)
                     hasChanges = true
                     table.insert(upgradesDone, "**" .. cat .. "**: `" .. current.Name .. "` ➔ `" .. best.Name .. "`")
-                    task.wait(0.4) 
+                    task.wait(0.5) 
                 end
             end
             
@@ -260,13 +266,14 @@ if CustomizeRemote then
                 pcall(function() CancelCustomizeRemote:FireServer() end)
             end
             
-            -- Pilitin isara yung UI sa screen
+            -- Isara nang pilit ang UI sa screen mo
             pcall(function()
                 local customizeUI = Players.LocalPlayer.PlayerGui:FindFirstChild("Customize")
                 if customizeUI then customizeUI.Enabled = false end
             end)
             
-            UpgradeLock = false -- 🔥 UNLOCK: Tapos na mag-upgrade, pwede na lumipat sa next PC
+            UpgradeLock = false 
+            _G.IsUpgradingPC = false
         end)
     end)
 end
@@ -302,22 +309,22 @@ local function scanAndUpgradePCs()
                 for _, data in ipairs(prompts) do
                     if IsShopping or not AutoUpgrade then break end
                     CurrentTargetPCName = data.Model.Name
-                    UpgradeLock = true -- 🔥 LOCK: Hintaying matapos yung thread sa taas
+                    UpgradeLock = true 
                     
                     hrp.Velocity = Vector3.new(0, 0, 0)
-                    hrp.CFrame = data.Prompt.Parent.CFrame * CFrame.new(0, 3, 3)
-                    task.wait(0.4) 
+                    hrp.CFrame = data.Prompt.Parent.CFrame * CFrame.new(0, 2, 2.5) -- Saktong-sakto sa harap
+                    task.wait(0.5) 
                     
+                    -- Pipindutin na ng VirtualInputManager
                     forceFirePrompt(data.Prompt)
                     
-                    -- Hihintayin hanggang sa matapos yung logic, max 6 seconds timeout
+                    -- Hihintayin matapos yung Upgrade (Max 10 seconds timeout para di ma-stuck)
                     local timeout = 0
-                    while UpgradeLock and timeout < 60 do
+                    while UpgradeLock and timeout < 100 do
                         task.wait(0.1)
                         timeout = timeout + 1
                     end
                     
-                    -- Safety net: Kung nag-timeout, i-cancel ang session at lumipat sa next PC
                     if UpgradeLock then
                         pcall(function() CancelCustomizeRemote:FireServer() end)
                         UpgradeLock = false
@@ -576,11 +583,9 @@ homeScroll.CanvasSize = UDim2.new(0, 0, 0, 360)
 
 local function handleToggle(btn, nameStr, stateVar)
     if stateVar then
-        btn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        btn.Text = nameStr .. ": ACTIVE"
+        btn.BackgroundColor3 = Color3.fromRGB(40, 160, 70); btn.Text = nameStr .. ": ACTIVE"
     else
-        btn.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        btn.Text = nameStr .. ": OFF"
+        btn.BackgroundColor3 = Color3.fromRGB(150, 40, 40); btn.Text = nameStr .. ": OFF"
     end
 end
 
@@ -643,10 +648,14 @@ toggleAppoint.MouseButton1Click:Connect(function() AutoAppoint = not AutoAppoint
 toggleChef.MouseButton1Click:Connect(function() AutoChef = not AutoChef; handleToggle(toggleChef, "🍳 AUTO CHEF", AutoChef) end)
 toggleExtinguish.MouseButton1Click:Connect(function() AutoExtinguish = not AutoExtinguish; handleToggle(toggleExtinguish, "🧯 AUTO EXTINGUISH", AutoExtinguish) end)
 toggleClean.MouseButton1Click:Connect(function() AutoClean = not AutoClean; handleToggle(toggleClean, "🧹 AUTO CLEAN (NIGHT)", AutoClean) end)
-toggleUpgrade.MouseButton1Click:Connect(function() AutoUpgrade = not AutoUpgrade; handleToggle(toggleUpgrade, "⚙️ AUTO UPGRADE", AutoUpgrade); if AutoUpgrade then scanAndUpgradePCs() end end)
+toggleUpgrade.MouseButton1Click:Connect(function() 
+    AutoUpgrade = not AutoUpgrade
+    handleToggle(toggleUpgrade, "⚙️ AUTO UPGRADE", AutoUpgrade)
+    if AutoUpgrade then scanAndUpgradePCs() end
+end)
 
 -- ==========================================
--- 🖥️ PC STATUS TAB (LIVE UPDATE & TOGGLES)
+-- 🖥️ PC STATUS TAB (LIVE UPDATE)
 -- ==========================================
 local statusHeader = Instance.new("TextLabel")
 statusHeader.Size = UDim2.new(0.9, 0, 0, 30)
