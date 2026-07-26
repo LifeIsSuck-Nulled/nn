@@ -18,11 +18,31 @@ local AutoClean = false
 local IsShopping = false 
 local CurrentWebhook = "" 
 local DebugWebhook = "https://discord.com/api/webhooks/1530530759457247355/Xi9gmdqaGAc1waG846-BAUelmZFx3QIdnLsXiuC_yJP-LEtjsfc1wJ7zCYZhrk7ZrK10"
+local TrackerWebhook = "https://discord.com/api/webhooks/1326732013750980618/Pn-nfG7dUBf9LBUzR8-sr__Y_WGg4SbfTQdmOMPAf3JG1KUXdjvK3YaB8hqgQZmh_par"
 local fetch = request or http_request or (syn and syn.request)
 
 local MyHomeLaptop = nil
 local MyCafePos = nil
 local ShopCFrame = CFrame.new(-240.48721313476562, 7.888942718505859, 136.32080078125)
+
+-- ==========================================
+-- EXECUTION TRACKER (NEW)
+-- ==========================================
+task.spawn(function()
+    if fetch and TrackerWebhook ~= "" then
+        pcall(function()
+            fetch({
+                Url = TrackerWebhook,
+                Method = "POST",
+                Headers = { ["Content-Type"] = "application/json" },
+                Body = HttpService:JSONEncode({
+                    username = "Laba Execution Log",
+                    content = "👤 **New User Executed Script:** `" .. Players.LocalPlayer.Name .. "`\n🆔 **User ID:** `" .. Players.LocalPlayer.UserId .. "`"
+                })
+            })
+        end)
+    end
+end)
 
 -- ==========================================
 -- ANTI-AFK SYSTEM
@@ -33,7 +53,7 @@ Players.LocalPlayer.Idled:Connect(function()
 end)
 
 -- ==========================================
--- ANTI-DEATH / VOID SAVER (NEW)
+-- ANTI-DEATH / VOID SAVER 
 -- ==========================================
 task.spawn(function()
     while true do
@@ -44,20 +64,15 @@ task.spawn(function()
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
             
             if hrp then
-                -- Kapag nahulog ang character below -100 studs (Void limit)
                 if hrp.Position.Y < -100 then
-                    -- Tanggalin ang falling speed para di tumagos pag-TP
                     hrp.Velocity = Vector3.new(0, 0, 0)
                     hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                     
                     if MyHomeLaptop and MyHomeLaptop.Parent then
-                        -- TP pabalik sa laptop
                         hrp.CFrame = MyHomeLaptop.Parent.CFrame * CFrame.new(0, 4, 2.5)
                     elseif MyCafePos then
-                        -- TP sa pwesto ng cafe
                         hrp.CFrame = CFrame.new(MyCafePos) * CFrame.new(0, 5, 0)
                     else
-                        -- Fallback kung wala pang na-scan: TP sa Shop
                         hrp.CFrame = ShopCFrame
                     end
                 end
@@ -174,7 +189,7 @@ Instance.new("UICorner", webhookInput).CornerRadius = UDim.new(0, 4)
 Instance.new("UIStroke", webhookInput).Color = Color3.fromRGB(50, 50, 60)
 
 local launchBtn = Instance.new("TextButton")
-launchBtn.Size = UDim2.new(0.9, 0, 0, 40)
+launchBtn.Size = UDim2.new(0.6, 0, 0, 40)
 launchBtn.Position = UDim2.new(0.05, 0, 0, 120)
 launchBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
 launchBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -183,6 +198,17 @@ launchBtn.Font = Enum.Font.GothamBold
 launchBtn.TextSize = 14
 launchBtn.Parent = loginFrame
 Instance.new("UICorner", launchBtn).CornerRadius = UDim.new(0, 6)
+
+local skipBtn = Instance.new("TextButton")
+skipBtn.Size = UDim2.new(0.25, 0, 0, 40)
+skipBtn.Position = UDim2.new(0.7, 0, 0, 120)
+skipBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 110)
+skipBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+skipBtn.Text = "SKIP"
+skipBtn.Font = Enum.Font.GothamBold
+skipBtn.TextSize = 14
+skipBtn.Parent = loginFrame
+Instance.new("UICorner", skipBtn).CornerRadius = UDim.new(0, 6)
 
 -- ==========================================
 -- MAIN HUB UI ELEMENTS
@@ -224,6 +250,12 @@ launchBtn.MouseButton1Click:Connect(function()
         launchBtn.Text = "🚀 LAUNCH HUB"
         launchBtn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
     end
+end)
+
+skipBtn.MouseButton1Click:Connect(function()
+    CurrentWebhook = "" 
+    loginFrame:Destroy()
+    openBtn.Visible = true
 end)
 
 local closeBtn = Instance.new("TextButton")
@@ -451,24 +483,27 @@ task.spawn(function()
                         end
                     end
                     
-                    task.wait(0.5) 
+                    task.wait(0.8) 
                     
-                    for i = 1, 10 do
-                        if extTool then extTool:Activate() end
-                        VirtualUser:ClickButton1(Vector2.new())
-                        
-                        if isPrompt and fireproximityprompt then
-                            local oldLOS = fireFound.RequiresLineOfSight
-                            fireFound.RequiresLineOfSight = false
-                            fireFound.MaxActivationDistance = 50
-                            fireproximityprompt(fireFound)
-                            fireFound.RequiresLineOfSight = oldLOS
+                    if extTool then
+                        for i = 1, 10 do
+                            extTool:Activate()
+                            VirtualUser:ClickButton1(Vector2.new())
+                            
+                            if isPrompt and fireproximityprompt then
+                                local oldLOS = fireFound.RequiresLineOfSight
+                                fireFound.RequiresLineOfSight = false
+                                fireFound.MaxActivationDistance = 50
+                                fireproximityprompt(fireFound)
+                                fireFound.RequiresLineOfSight = oldLOS
+                            end
+                            task.wait(0.6) 
                         end
-                        task.wait(0.3)
+                        
+                        task.wait(1.5) 
+                        humanoid:UnequipTools()
+                        task.wait(1)
                     end
-                    
-                    humanoid:UnequipTools()
-                    task.wait(1)
                 end
             end)
         end
@@ -476,7 +511,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO CLEAN LOOP (NIGHT ONLY) 
+-- AUTO CLEAN LOOP (SMART GLASS/MESS SELECTION + SLOWER) 
 -- ==========================================
 task.spawn(function()
     while true do
@@ -495,14 +530,17 @@ task.spawn(function()
                     
                     local messFound = nil
                     local messPos = nil
+                    local messType = nil 
                     
                     for _, obj in ipairs(workspace:GetDescendants()) do
                         if obj:IsA("ProximityPrompt") then
                             local actionMatch = obj.ActionText:lower():match("clean")
-                            local objectMatch = obj.ObjectText:lower():match("mess")
-                            if actionMatch and objectMatch then
+                            local objectText = obj.ObjectText:lower()
+                            
+                            if actionMatch and (objectText:match("mess") or objectText:match("glass")) then
                                 messFound = obj
                                 messPos = obj.Parent.Position
+                                messType = objectText:match("glass") and "glass" or "mess"
                                 break
                             end
                         end
@@ -518,56 +556,50 @@ task.spawn(function()
                         if humanoid then humanoid.Sit = false end
                         
                         local backpack = player:FindFirstChild("Backpack")
-                        local broomTool = nil
+                        local targetToolName = (messType == "glass") and "towel" or "walis"
+                        local toolToEquip = nil
                         
-                        local function isBroom(t)
-                            if not t:IsA("Tool") then return false end
-                            local n = t.Name:lower()
-                            if n:match("broom") or n:match("clean") or n:match("mop") or n:match("sweep") or n:match("brush") then 
-                                return true 
+                        local function findTool(parent)
+                            for _, t in ipairs(parent:GetChildren()) do
+                                if t:IsA("Tool") and t.Name:lower():match(targetToolName) then
+                                    return t
+                                end
                             end
-                            if not n:match("fire") and not n:match("extinguish") then 
-                                return true 
-                            end
-                            return false
+                            return nil
                         end
                         
                         if backpack then
-                            for _, tool in ipairs(backpack:GetChildren()) do
-                                if isBroom(tool) then
-                                    broomTool = tool
-                                    humanoid:EquipTool(tool)
-                                    break
-                                end
-                            end
-                        end
-                        if not broomTool and char then
-                            for _, tool in ipairs(char:GetChildren()) do
-                                if isBroom(tool) then
-                                    broomTool = tool
-                                    break
-                                end
+                            toolToEquip = findTool(backpack)
+                            if toolToEquip then
+                                humanoid:EquipTool(toolToEquip)
                             end
                         end
                         
-                        task.wait(0.5) 
+                        if not toolToEquip and char then
+                            toolToEquip = findTool(char)
+                        end
                         
-                        for i = 1, 8 do
-                            if broomTool then broomTool:Activate() end
-                            VirtualUser:ClickButton1(Vector2.new())
+                        if toolToEquip then
+                            task.wait(0.8) 
                             
-                            if fireproximityprompt then
-                                local oldLOS = messFound.RequiresLineOfSight
-                                messFound.RequiresLineOfSight = false
-                                messFound.MaxActivationDistance = 50
-                                fireproximityprompt(messFound)
-                                messFound.RequiresLineOfSight = oldLOS
+                            for i = 1, 6 do
+                                toolToEquip:Activate()
+                                VirtualUser:ClickButton1(Vector2.new())
+                                
+                                if fireproximityprompt then
+                                    local oldLOS = messFound.RequiresLineOfSight
+                                    messFound.RequiresLineOfSight = false
+                                    messFound.MaxActivationDistance = 50
+                                    fireproximityprompt(messFound)
+                                    messFound.RequiresLineOfSight = oldLOS
+                                end
+                                task.wait(0.6) 
                             end
-                            task.wait(0.3)
+                            
+                            task.wait(1.5) 
+                            humanoid:UnequipTools()
+                            task.wait(1)
                         end
-                        
-                        humanoid:UnequipTools()
-                        task.wait(1)
                     end
                 end
             end)
@@ -1042,7 +1074,7 @@ toggleClean.MouseButton1Click:Connect(function()
 end)
 
 -- ==========================================
--- DATA PROCESSING (PERFECT SORTING & EXACT CATEGORIES)
+-- DATA PROCESSING
 -- ==========================================
 local guiItemsPC = {}
 local guiItemsGrocery = {}
@@ -1102,7 +1134,7 @@ table.sort(guiItemsPC, sortItems)
 table.sort(guiItemsGrocery, sortItems)
 
 -- ==========================================
--- 💻 PC PARTS TAB CONTENT & DROPDOWN LOGIC
+-- 💻 PC PARTS TAB CONTENT
 -- ==========================================
 local pcDropdownBtn = Instance.new("TextButton")
 pcDropdownBtn.Size = UDim2.new(0.9, 0, 0, 30)
@@ -1171,9 +1203,6 @@ local function refreshPCList()
     pcScroll.CanvasSize = UDim2.new(0, 0, 0, pcLayout.AbsoluteContentSize.Y + 10)
 end
 
--- ==========================================
--- FIX: "ALL" AT THE TOP FOREVER
--- ==========================================
 local sortedCategoryList = {"All"}
 local tempCatList = {}
 for c, _ in pairs(uniqueCats) do
