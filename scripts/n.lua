@@ -1035,17 +1035,21 @@ task.spawn(function()
                             local actionMatch = obj.ActionText:lower():match("clean")
                             local objectText = obj.ObjectText:lower()
                             
-                            if actionMatch and (objectText:match("mess") or objectText:match("glass")) then
+                            if actionMatch and (objectText:match("mess") or objectText:match("glass") or objectText:match("spill") or objectText:match("trash")) then
                                 messFound = obj
                                 messPos = obj.Parent.Position
-                                messType = objectText:match("glass") and "glass" or "mess"
+                                messType = (objectText:match("glass") or objectText:match("window")) and "glass" or "mess"
                                 break
                             end
                         end
                     end
                     
                     if messFound and messPos then
-                        if MyCafePos and (messPos - MyCafePos).Magnitude > 200 then return end
+                        -- 🔥 STRICT BASE CHECK: Flat Distance para sakop ang 2nd Floor
+                        if MyCafePos then
+                            local flatDist = Vector2.new(messPos.X - MyCafePos.X, messPos.Z - MyCafePos.Z).Magnitude
+                            if flatDist > 120 then return end -- Wag linisin kung nasa labas ng lote
+                        end
                         
                         IsBusy = true -- LOCK TASKS
                         
@@ -1059,15 +1063,22 @@ task.spawn(function()
                         task.wait(0.3)
                         if humanoid then humanoid.Sit = false end
                         
-                        local targetToolName = (messType == "glass") and "towel" or "walis"
+                        -- 🔥 SMART TOOL SELECTOR: Para hindi magkamali ng bubunutin
+                        local allowedTools = (messType == "glass") and {"towel", "sponge", "wipe", "rag"} or {"walis", "broom", "mop", "sweep"}
                         local toolToEquip = nil
                         local backpack = player:FindFirstChild("Backpack")
                         
                         if backpack then
                             for _, t in ipairs(backpack:GetChildren()) do
-                                if t:IsA("Tool") and t.Name:lower():match(targetToolName) then
-                                    toolToEquip = t
-                                    break
+                                if t:IsA("Tool") then
+                                    local tName = t.Name:lower()
+                                    for _, allowed in ipairs(allowedTools) do
+                                        if tName:match(allowed) then
+                                            toolToEquip = t
+                                            break
+                                        end
+                                    end
+                                    if toolToEquip then break end
                                 end
                             end
                         end
@@ -1090,13 +1101,28 @@ task.spawn(function()
                                         toolToEquip:Activate()
                                         VirtualUser:ClickButton1(Vector2.new())
                                         
-                                        if fireproximityprompt then
+                                        -- 🔥 HOLD "E" SIMULATION BYPASS
+                                        pcall(function()
                                             local oldLOS = messFound.RequiresLineOfSight
+                                            local oldDist = messFound.MaxActivationDistance
                                             messFound.RequiresLineOfSight = false
                                             messFound.MaxActivationDistance = 50
-                                            fireproximityprompt(messFound)
+                                            
+                                            if fireproximityprompt then
+                                                fireproximityprompt(messFound, 0)
+                                                fireproximityprompt(messFound, 1)
+                                                fireproximityprompt(messFound)
+                                            end
+                                            
+                                            if messFound.InputHoldBegin then
+                                                messFound:InputHoldBegin()
+                                                task.wait(0.2) -- Simulated Hold Duration
+                                                messFound:InputHoldEnd()
+                                            end
+                                            
                                             messFound.RequiresLineOfSight = oldLOS
-                                        end
+                                            messFound.MaxActivationDistance = oldDist
+                                        end)
                                     end
                                     task.wait(0.6) 
                                 end
