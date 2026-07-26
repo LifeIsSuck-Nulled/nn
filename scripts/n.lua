@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local VirtualUser = game:GetService("VirtualUser")
+local VirtualInputManager = game:GetService("VirtualInputManager")
 local Lighting = game:GetService("Lighting")
 
 -- ==========================================
@@ -905,6 +906,70 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
 end)
 
 -- ==========================================
+-- CAFE RADAR & BOUNDARY CHECKER
+-- ==========================================
+local function refreshCafePosition()
+    local player = Players.LocalPlayer
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    local bases = workspace:FindFirstChild("Bases")
+    
+    if bases then
+        for _, base in ipairs(bases:GetChildren()) do
+            if base:GetAttribute("OwnerUserId") == player.UserId then
+                if base:IsA("Model") then MyCafePos = base:GetPivot().Position return
+                elseif base:IsA("BasePart") then MyCafePos = base.Position return end
+            end
+        end
+    end
+    
+    if hrp then
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("ProximityPrompt") then
+                local n, o = obj.Name:lower(), obj.ObjectText:lower()
+                if n:match("laptop") or n:match("server") or o:match("laptop") or o:match("server") then
+                    if obj.Parent and obj.Parent:IsA("BasePart") and (hrp.Position - obj.Parent.Position).Magnitude < 150 then
+                        MyCafePos = obj.Parent.Position return
+                    end
+                end
+            end
+        end
+        MyCafePos = hrp.Position
+    end
+end
+
+local function isInsideMyBase(targetPos)
+    refreshCafePosition()
+    if not MyCafePos or not targetPos then return false end
+    local flatDist = Vector2.new(targetPos.X - MyCafePos.X, targetPos.Z - MyCafePos.Z).Magnitude
+    return flatDist <= 120 
+end
+
+local function forceFirePrompt(prompt)
+    if not prompt or not prompt:IsA("ProximityPrompt") then return end
+    pcall(function()
+        local oldDist = prompt.MaxActivationDistance
+        local oldLOS = prompt.RequiresLineOfSight
+        prompt.MaxActivationDistance = 50
+        prompt.RequiresLineOfSight = false
+        
+        if fireproximityprompt then
+            pcall(function() fireproximityprompt(prompt, 0) end)
+            pcall(function() fireproximityprompt(prompt, 1) end)
+            pcall(function() fireproximityprompt(prompt) end)
+        end
+        if prompt.InputHoldBegin then
+            pcall(function() prompt:InputHoldBegin() end)
+            task.delay(0.2, function() pcall(function() prompt:InputHoldEnd() end) end)
+        end
+        
+        task.delay(1, function()
+            prompt.MaxActivationDistance = oldDist
+            prompt.RequiresLineOfSight = oldLOS
+        end)
+    end)
+end
+
+-- ==========================================
 -- AUTO EXTINGUISH LOOP (ISBUSY FIX)
 -- ==========================================
 task.spawn(function()
@@ -926,13 +991,15 @@ task.spawn(function()
                 for _, obj in ipairs(workspace:GetDescendants()) do
                     local name = obj.Name:lower()
                     if obj:IsA("ProximityPrompt") and (name:match("extinguish") or obj.ActionText:lower():match("extinguish") or obj.ObjectText:lower():match("fire")) then
-                        fireFound = obj
-                        firePart = obj.Parent
-                        isPrompt = true
-                        break
+                        if obj.Parent and isInsideMyBase(obj.Parent.Position) then
+                            fireFound = obj
+                            firePart = obj.Parent
+                            isPrompt = true
+                            break
+                        end
                     elseif (obj:IsA("ParticleEmitter") or obj:IsA("Fire")) and (name:match("fire") or name:match("flame")) then
                         local part = obj.Parent
-                        if part and part:IsA("BasePart") then
+                        if part and part:IsA("BasePart") and isInsideMyBase(part.Position) then
                             fireFound = obj
                             firePart = part
                             break
@@ -942,11 +1009,9 @@ task.spawn(function()
                 
                 if fireFound and firePart then
                     local targetPos = firePart.Position
-                    if MyCafePos and (targetPos - MyCafePos).Magnitude > 200 then return end
                     
-                    IsBusy = true -- LOCK TASKS
+                    IsBusy = true 
                     
-                    -- Piliting bitawan lahat ng hawak bago bumunot para iwas bug
                     humanoid:UnequipTools()
                     task.wait(0.2)
                     
@@ -1001,7 +1066,7 @@ task.spawn(function()
                     end
                     
                     humanoid:UnequipTools()
-                    IsBusy = false -- UNLOCK TASKS
+                    IsBusy = false 
                 end
             end)
         end
@@ -1009,7 +1074,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO CLEAN LOOP (ISBUSY FIX)
+-- AUTO CLEAN LOOP (STRICT WALIS & TOWEL ONLY)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -1036,26 +1101,21 @@ task.spawn(function()
                             local objectText = obj.ObjectText:lower()
                             
                             if actionMatch and (objectText:match("mess") or objectText:match("glass") or objectText:match("spill") or objectText:match("trash")) then
-                                messFound = obj
-                                messPos = obj.Parent.Position
-                                messType = (objectText:match("glass") or objectText:match("window")) and "glass" or "mess"
-                                break
+                                if obj.Parent and isInsideMyBase(obj.Parent.Position) then
+                                    messFound = obj
+                                    messPos = obj.Parent.Position
+                                    messType = (objectText:match("glass") or objectText:match("window")) and "glass" or "mess"
+                                    break
+                                end
                             end
                         end
                     end
                     
                     if messFound and messPos then
-                        -- 🔥 STRICT BASE CHECK: Flat Distance para sakop ang 2nd Floor
-                        if MyCafePos then
-                            local flatDist = Vector2.new(messPos.X - MyCafePos.X, messPos.Z - MyCafePos.Z).Magnitude
-                            if flatDist > 120 then return end -- Wag linisin kung nasa labas ng lote
-                        end
+                        IsBusy = true 
                         
-                        IsBusy = true -- LOCK TASKS
-                        
-                        -- Piliting bitawan lahat ng hawak bago bumunot para iwas bug
                         humanoid:UnequipTools()
-                        task.wait(0.2)
+                        task.wait(0.3)
                         
                         hrp.CFrame = CFrame.new(messPos) * CFrame.new(0, 2.5, 2.5)
                         task.wait(0.2)
@@ -1063,8 +1123,8 @@ task.spawn(function()
                         task.wait(0.3)
                         if humanoid then humanoid.Sit = false end
                         
-                        -- 🔥 SMART TOOL SELECTOR: Para hindi magkamali ng bubunutin
-                        local allowedTools = (messType == "glass") and {"towel", "sponge", "wipe", "rag"} or {"walis", "broom", "mop", "sweep"}
+                        -- 🔥 STRICT TOOL SELECTOR: Walis at Towel lang, Bawal ang Fire Extinguisher!
+                        local allowedTools = (messType == "glass") and {"towel", "sponge", "wipe", "rag"} else {"walis", "broom", "mop", "sweep"} end
                         local toolToEquip = nil
                         local backpack = player:FindFirstChild("Backpack")
                         
@@ -1101,7 +1161,6 @@ task.spawn(function()
                                         toolToEquip:Activate()
                                         VirtualUser:ClickButton1(Vector2.new())
                                         
-                                        -- 🔥 HOLD "E" SIMULATION BYPASS
                                         pcall(function()
                                             local oldLOS = messFound.RequiresLineOfSight
                                             local oldDist = messFound.MaxActivationDistance
@@ -1116,7 +1175,7 @@ task.spawn(function()
                                             
                                             if messFound.InputHoldBegin then
                                                 messFound:InputHoldBegin()
-                                                task.wait(0.2) -- Simulated Hold Duration
+                                                task.wait(0.2)
                                                 messFound:InputHoldEnd()
                                             end
                                             
@@ -1131,7 +1190,7 @@ task.spawn(function()
                         end
                         
                         humanoid:UnequipTools()
-                        IsBusy = false -- UNLOCK TASKS
+                        IsBusy = false 
                     end
                 end
             end)
@@ -1170,7 +1229,7 @@ task.spawn(function()
                                     local part = obj.Parent
                                     if part and part:IsA("BasePart") then
                                         local dist = (hrp.Position - part.Position).Magnitude
-                                        if dist < shortestDistance and dist < 150 then
+                                        if dist < shortestDistance and dist < 150 and isInsideMyBase(part.Position) then
                                             shortestDistance = dist
                                             closestPrompt = obj
                                         end
@@ -1328,7 +1387,7 @@ task.spawn(function()
                                         end
                                         
                                         if pos then
-                                            if MyCafePos and (pos - MyCafePos).Magnitude > 200 then
+                                            if not isInsideMyBase(pos) then
                                                 continue 
                                             end
                                             
