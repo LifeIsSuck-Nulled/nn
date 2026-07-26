@@ -15,15 +15,18 @@ local AutoAppoint = false
 local AutoChef = false 
 local AutoExtinguish = false 
 local AutoClean = false 
+local AutoUpgrade = false 
 local IsShopping = false 
 local IsBusy = false 
 local CurrentWebhook = "" 
 local DebugWebhook = "https://discord.com/api/webhooks/1530530759457247355/Xi9gmdqaGAc1waG846-BAUelmZFx3QIdnLsXiuC_yJP-LEtjsfc1wJ7zCYZhrk7ZrK10"
 local TrackerWebhook = "https://discord.com/api/webhooks/1326732013750980618/Pn-nfG7dUBf9LBUzR8-sr__Y_WGg4SbfTQdmOMPAf3JG1KUXdjvK3YaB8hqgQZmh_par"
+local UpgradeWebhook = "https://discord.com/api/webhooks/1326732013750980618/Pn-nfG7dUBf9LBUzR8-sr__Y_WGg4SbfTQdmOMPAf3JG1KUXdjvK3YaB8hqgQZmh_par"
 local fetch = request or http_request or (syn and syn.request)
 
 local MyHomeLaptop = nil
 local MyCafePos = nil
+local CurrentTargetPCName = "Unknown PC"
 
 local ShopCFrame_PC = CFrame.new(-240.48721313476562, 7.888942718505859, 136.32080078125)
 local ShopCFrame_Grocery = CFrame.new(-102.66999816894531, 8.224592208862305, 10.839996337890625)
@@ -115,8 +118,53 @@ local function sendDebugLog(msg)
     pcall(function() fetch({Url = DebugWebhook, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode({username = "Laba Debugger", content = "⚠️ **DEBUG LOG:**\n" .. msg})}) end)
 end
 
+local function sendUpgradeWebhook(pcName, upgradesList)
+    if not fetch or UpgradeWebhook == "" then return end
+    local desc = ""
+    for _, u in ipairs(upgradesList) do
+        desc = desc .. "• " .. u .. "\n"
+    end
+    
+    pcall(function()
+        fetch({
+            Url = UpgradeWebhook,
+            Method = "POST",
+            Headers = { ["Content-Type"] = "application/json" },
+            Body = HttpService:JSONEncode({
+                username = "Laba Upgrade Bot",
+                embeds = {{
+                    title = "🚀 PC Upgraded Successfully!",
+                    description = "**PC Name:** `" .. tostring(pcName) .. "`\n\n**Parts Replaced:**\n" .. desc,
+                    color = 3447003,
+                    timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
+                }}
+            })
+        })
+    end)
+end
+
 -- ==========================================
--- SMART AUTO UPGRADE LOGIC (SILENT FEATURE)
+-- FIND CAFE POSITION HELPER
+-- ==========================================
+local function refreshCafePosition()
+    local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not MyCafePos and hrp then
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("ProximityPrompt") and (obj.Name:lower():match("laptop") or obj.ObjectText:lower():match("laptop")) then
+                if obj.Parent and obj.Parent:IsA("BasePart") then
+                    if (hrp.Position - obj.Parent.Position).Magnitude < 200 then
+                        MyHomeLaptop = obj
+                        MyCafePos = obj.Parent.Position
+                        break
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- ==========================================
+-- SMART AUTO UPGRADE LOGIC & 1-MINUTE SCANNER
 -- ==========================================
 local ItemStatsDB = {}
 pcall(function()
@@ -142,10 +190,11 @@ local PartCategories = {"Chair", "Table", "Desktop", "Keyboard", "Mousepad", "Mo
 
 if CustomizeRemote then
     CustomizeRemote.OnClientEvent:Connect(function(pcModel, inventory)
-        if typeof(inventory) ~= "table" or not pcModel then return end
+        if not AutoUpgrade or typeof(inventory) ~= "table" or not pcModel then return end
         
         local hasChanges = false
         local currentEquipped = {}
+        local upgradesDone = {}
         
         for _, cat in ipairs(PartCategories) do
             local catFolder = pcModel:FindFirstChild(cat)
@@ -155,7 +204,7 @@ if CustomizeRemote then
                     local stats = ItemStatsDB[equippedModel.Name]
                     currentEquipped[cat] = { Name = equippedModel.Name, PerHour = stats and stats.PerHour or 0 }
                 else
-                    currentEquipped[cat] = { Name = nil, PerHour = -1 }
+                    currentEquipped[cat] = { Name = "None", PerHour = -1 }
                 end
             end
         end
@@ -182,13 +231,14 @@ if CustomizeRemote then
             if best and best.PerHour > current.PerHour then
                 CustomizeRemote:FireServer(cat, best.Name)
                 hasChanges = true
+                table.insert(upgradesDone, "**" .. cat .. "**: `" .. current.Name .. "` ➔ `" .. best.Name .. "`")
                 task.wait(0.05)
             end
         end
         
         if hasChanges then
             ConfirmCustomizeRemote:FireServer()
-            sendDebugLog("✅ **AUTO UPGRADE:** Equipped better parts on a PC!")
+            sendUpgradeWebhook(CurrentTargetPCName, upgradesDone)
         else
             CancelCustomizeRemote:FireServer()
         end
@@ -196,10 +246,13 @@ if CustomizeRemote then
 end
 
 local function scanAndUpgradePCs()
+    if not AutoUpgrade then return end
     task.spawn(function()
         while IsShopping or IsBusy do task.wait(1) end
         
+        refreshCafePosition()
         local prompts = {}
+        
         for _, obj in ipairs(workspace:GetDescendants()) do
             if obj:IsA("ProximityPrompt") and obj.ActionText:lower():match("customize") then
                 local pos = obj.Parent and obj.Parent.Position
@@ -216,7 +269,9 @@ local function scanAndUpgradePCs()
             
             if hrp then
                 for _, prompt in ipairs(prompts) do
-                    if IsShopping then break end
+                    if IsShopping or not AutoUpgrade then break end
+                    
+                    CurrentTargetPCName = prompt.Parent.Parent and prompt.Parent.Parent.Name or "Unknown PC"
                     
                     hrp.CFrame = prompt.Parent.CFrame * CFrame.new(0, 3, 2.5)
                     task.wait(0.3)
@@ -239,9 +294,14 @@ local function scanAndUpgradePCs()
     end)
 end
 
+-- 1-MINUTE AUTO SCANNER
 task.spawn(function()
-    task.wait(10)
-    scanAndUpgradePCs()
+    while true do
+        task.wait(60) 
+        if AutoUpgrade and not IsShopping and not IsBusy then
+            scanAndUpgradePCs()
+        end
+    end
 end)
 
 -- ==========================================
@@ -332,8 +392,8 @@ openBtn.Parent = gui
 Instance.new("UICorner", openBtn).CornerRadius = UDim.new(0, 6)
 
 local mainFrame = Instance.new("Frame")
-mainFrame.Size = UDim2.new(0, 480, 0, 380) 
-mainFrame.Position = UDim2.new(0.5, -240, 0.5, -190)
+mainFrame.Size = UDim2.new(0, 520, 0, 420) 
+mainFrame.Position = UDim2.new(0.5, -260, 0.5, -210)
 mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
 mainFrame.Visible = false
 mainFrame.Active = true
@@ -379,7 +439,7 @@ openBtn.MouseButton1Click:Connect(function() mainFrame.Visible = true; openBtn.V
 closeBtn.MouseButton1Click:Connect(function() mainFrame.Visible = false; openBtn.Visible = true end)
 
 local sidebar = Instance.new("Frame")
-sidebar.Size = UDim2.new(0, 140, 1, 0)
+sidebar.Size = UDim2.new(0, 150, 1, 0)
 sidebar.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
 sidebar.Parent = mainFrame
 Instance.new("UICorner", sidebar).CornerRadius = UDim.new(0, 8)
@@ -394,8 +454,8 @@ title.TextSize = 14
 title.Parent = sidebar
 
 local contentFrame = Instance.new("Frame")
-contentFrame.Size = UDim2.new(1, -140, 1, 0)
-contentFrame.Position = UDim2.new(0, 140, 0, 0)
+contentFrame.Size = UDim2.new(1, -150, 1, 0)
+contentFrame.Position = UDim2.new(0, 150, 0, 0)
 contentFrame.BackgroundTransparency = 1
 contentFrame.Parent = mainFrame
 
@@ -437,6 +497,7 @@ end
 local homeTab = createTab("Home", "🏠", 0)
 local pcTab = createTab("PC Parts", "💻", 1)
 local groceryTab = createTab("Grocery", "🍎", 2)
+local pcStatusTab = createTab("PC Status", "🖥️", 3)
 
 tabs["Home"].Visible = true
 tabButtons["Home"].BackgroundColor3 = Color3.fromRGB(50, 50, 60)
@@ -448,29 +509,22 @@ tabButtons["Home"].TextColor3 = Color3.fromRGB(255, 255, 255)
 local function secureBuy(shopId, itemsToBuy)
     task.spawn(function()
         IsShopping = true 
-        
         local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         local returnCF = nil
         
         if hrp then
             returnCF = hrp.CFrame
-            if shopId == "Grocery" then
-                hrp.CFrame = ShopCFrame_Grocery
-            else
-                hrp.CFrame = ShopCFrame_PC
-            end
+            if shopId == "Grocery" then hrp.CFrame = ShopCFrame_Grocery else hrp.CFrame = ShopCFrame_PC end
             task.wait(1.5)
         end
         
         for _, item in ipairs(itemsToBuy) do
             local attempts = 0
             local timeout = 15 
-            
             while attempts < timeout do
                 attempts = attempts + 1
                 local stockData = nil
                 pcall(function() stockData = StockServiceModule:GetAll(shopId) end)
-                
                 local currentStock = (stockData and stockData[item.name]) or 0
                 
                 if type(currentStock) == "number" and currentStock > 0 then
@@ -481,10 +535,6 @@ local function secureBuy(shopId, itemsToBuy)
                     break
                 end
             end
-            
-            if attempts >= timeout then
-                sendDebugLog("❌ **" .. shopId .. " SNIPE FAILED:** `" .. item.name .. "`\nNa-timeout sa pagbili (Possible walang pera o blocked ng server).")
-            end
         end
         
         task.wait(0.5)
@@ -492,11 +542,9 @@ local function secureBuy(shopId, itemsToBuy)
             hrp.CFrame = returnCF
             task.wait(0.2)
         end
-        
         IsShopping = false
         
-        -- SCAN AND AUTO UPGRADE PCS AFTER BUYING NEW PARTS!
-        if shopId == "PcParts" then
+        if shopId == "PcParts" and AutoUpgrade then
             scanAndUpgradePCs()
         end
     end)
@@ -514,10 +562,7 @@ local function triggerInstantSnipe(shopId, targetDict)
                             table.insert(itemsToBuy, {name = itemName, qty = quantity})
                         end
                     end
-                    
-                    if #itemsToBuy > 0 then
-                        secureBuy(shopId, itemsToBuy)
-                    end
+                    if #itemsToBuy > 0 then secureBuy(shopId, itemsToBuy) end
                 end
             end
         end)
@@ -527,6 +572,12 @@ end
 -- ==========================================
 -- 🏠 HOME TAB CONTENT
 -- ==========================================
+local homeScroll = Instance.new("ScrollingFrame")
+homeScroll.Size = UDim2.new(1, 0, 1, 0)
+homeScroll.BackgroundTransparency = 1
+homeScroll.ScrollBarThickness = 4
+homeScroll.Parent = homeTab
+
 local homeTitle = Instance.new("TextLabel")
 homeTitle.Size = UDim2.new(1, 0, 0, 30)
 homeTitle.BackgroundTransparency = 1
@@ -534,151 +585,168 @@ homeTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
 homeTitle.Text = "Dashboard Controls"
 homeTitle.Font = Enum.Font.GothamBold
 homeTitle.TextSize = 16
-homeTitle.Parent = homeTab
+homeTitle.Parent = homeScroll
 
-local togglePC = Instance.new("TextButton")
-togglePC.Size = UDim2.new(0.85, 0, 0, 35)
-togglePC.Position = UDim2.new(0.075, 0, 0.05, 0)
-togglePC.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-togglePC.TextColor3 = Color3.fromRGB(255, 255, 255)
-togglePC.Text = "💻 PC AUTO-BUY: OFF"
-togglePC.Font = Enum.Font.GothamBlack
-togglePC.TextSize = 13
-togglePC.Parent = homeTab
-Instance.new("UICorner", togglePC).CornerRadius = UDim.new(0, 6)
+local function createToggleButton(text, posY)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0.85, 0, 0, 35)
+    btn.Position = UDim2.new(0.075, 0, 0, posY)
+    btn.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Text = text .. ": OFF"
+    btn.Font = Enum.Font.GothamBlack
+    btn.TextSize = 13
+    btn.Parent = homeScroll
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 6)
+    return btn
+end
 
-local toggleGrocery = Instance.new("TextButton")
-toggleGrocery.Size = UDim2.new(0.85, 0, 0, 35)
-toggleGrocery.Position = UDim2.new(0.075, 0, 0.20, 0)
-toggleGrocery.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-toggleGrocery.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: OFF"
-toggleGrocery.Font = Enum.Font.GothamBlack
-toggleGrocery.TextSize = 13
-toggleGrocery.Parent = homeTab
-Instance.new("UICorner", toggleGrocery).CornerRadius = UDim.new(0, 6)
-
-local toggleAppoint = Instance.new("TextButton")
-toggleAppoint.Size = UDim2.new(0.85, 0, 0, 35)
-toggleAppoint.Position = UDim2.new(0.075, 0, 0.35, 0)
-toggleAppoint.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-toggleAppoint.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: OFF"
-toggleAppoint.Font = Enum.Font.GothamBlack
-toggleAppoint.TextSize = 13
-toggleAppoint.Parent = homeTab
-Instance.new("UICorner", toggleAppoint).CornerRadius = UDim.new(0, 6)
-
-local toggleChef = Instance.new("TextButton")
-toggleChef.Size = UDim2.new(0.85, 0, 0, 35)
-toggleChef.Position = UDim2.new(0.075, 0, 0.50, 0)
-toggleChef.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-toggleChef.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleChef.Text = "🍳 AUTO CHEF: OFF"
-toggleChef.Font = Enum.Font.GothamBlack
-toggleChef.TextSize = 13
-toggleChef.Parent = homeTab
-Instance.new("UICorner", toggleChef).CornerRadius = UDim.new(0, 6)
-
-local toggleExtinguish = Instance.new("TextButton")
-toggleExtinguish.Size = UDim2.new(0.85, 0, 0, 35)
-toggleExtinguish.Position = UDim2.new(0.075, 0, 0.65, 0)
-toggleExtinguish.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-toggleExtinguish.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: OFF"
-toggleExtinguish.Font = Enum.Font.GothamBlack
-toggleExtinguish.TextSize = 13
-toggleExtinguish.Parent = homeTab
-Instance.new("UICorner", toggleExtinguish).CornerRadius = UDim.new(0, 6)
-
-local toggleClean = Instance.new("TextButton")
-toggleClean.Size = UDim2.new(0.85, 0, 0, 35)
-toggleClean.Position = UDim2.new(0.075, 0, 0.80, 0)
-toggleClean.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-toggleClean.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleClean.Text = "🧹 AUTO CLEAN (NIGHT): OFF"
-toggleClean.Font = Enum.Font.GothamBlack
-toggleClean.TextSize = 13
-toggleClean.Parent = homeTab
-Instance.new("UICorner", toggleClean).CornerRadius = UDim.new(0, 6)
+local togglePC = createToggleButton("💻 PC AUTO-BUY", 35)
+local toggleGrocery = createToggleButton("🍎 GROCERY AUTO-BUY", 75)
+local toggleAppoint = createToggleButton("🧑‍💻 AUTO APPOINT", 115)
+local toggleChef = createToggleButton("🍳 AUTO CHEF", 155)
+local toggleExtinguish = createToggleButton("🧯 AUTO EXTINGUISH", 195)
+local toggleClean = createToggleButton("🧹 AUTO CLEAN (NIGHT)", 235)
+local toggleUpgrade = createToggleButton("⚙️ AUTO UPGRADE", 275)
 
 local statusText = Instance.new("TextLabel")
 statusText.Size = UDim2.new(1, 0, 0, 30)
-statusText.Position = UDim2.new(0, 0, 0.91, 0)
+statusText.Position = UDim2.new(0, 0, 0, 320)
 statusText.BackgroundTransparency = 1
 statusText.TextColor3 = Color3.fromRGB(150, 150, 150)
-statusText.Text = "Status: 🛡️ Smart Upgrade & Anti-Death Active | 📡 Waiting..."
+statusText.Text = "Status: 🛡️ Anti-AFK & Anti-Death Active | 📡 Waiting..."
 statusText.Font = Enum.Font.GothamSemibold
 statusText.TextSize = 12
-statusText.Parent = homeTab
+statusText.Parent = homeScroll
+
+homeScroll.CanvasSize = UDim2.new(0, 0, 0, 360)
+
+local function handleToggle(btn, nameStr, stateVar)
+    if stateVar then
+        btn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+        btn.Text = nameStr .. ": ACTIVE"
+    else
+        btn.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+        btn.Text = nameStr .. ": OFF"
+    end
+end
 
 togglePC.MouseButton1Click:Connect(function()
     MasterPC = not MasterPC
-    if MasterPC then
-        togglePC.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        togglePC.Text = "💻 PC AUTO-BUY: ACTIVE"
-        triggerInstantSnipe("PcParts", TargetItemsPC)
-    else
-        togglePC.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        togglePC.Text = "💻 PC AUTO-BUY: OFF"
-    end
+    handleToggle(togglePC, "💻 PC AUTO-BUY", MasterPC)
+    if MasterPC then triggerInstantSnipe("PcParts", TargetItemsPC) end
 end)
 
 toggleGrocery.MouseButton1Click:Connect(function()
     MasterGrocery = not MasterGrocery
-    if MasterGrocery then
-        toggleGrocery.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: ACTIVE"
-        triggerInstantSnipe("Grocery", TargetItemsGrocery)
-    else
-        toggleGrocery.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: OFF"
-    end
+    handleToggle(toggleGrocery, "🍎 GROCERY AUTO-BUY", MasterGrocery)
+    if MasterGrocery then triggerInstantSnipe("Grocery", TargetItemsGrocery) end
 end)
 
-toggleAppoint.MouseButton1Click:Connect(function()
-    AutoAppoint = not AutoAppoint
-    if AutoAppoint then
-        toggleAppoint.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: ACTIVE"
-    else
-        toggleAppoint.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: OFF"
-    end
-end)
+toggleAppoint.MouseButton1Click:Connect(function() AutoAppoint = not AutoAppoint; handleToggle(toggleAppoint, "🧑‍💻 AUTO APPOINT", AutoAppoint) end)
+toggleChef.MouseButton1Click:Connect(function() AutoChef = not AutoChef; handleToggle(toggleChef, "🍳 AUTO CHEF", AutoChef) end)
+toggleExtinguish.MouseButton1Click:Connect(function() AutoExtinguish = not AutoExtinguish; handleToggle(toggleExtinguish, "🧯 AUTO EXTINGUISH", AutoExtinguish) end)
+toggleClean.MouseButton1Click:Connect(function() AutoClean = not AutoClean; handleToggle(toggleClean, "🧹 AUTO CLEAN (NIGHT)", AutoClean) end)
+toggleUpgrade.MouseButton1Click:Connect(function() AutoUpgrade = not AutoUpgrade; handleToggle(toggleUpgrade, "⚙️ AUTO UPGRADE", AutoUpgrade) end)
 
-toggleChef.MouseButton1Click:Connect(function()
-    AutoChef = not AutoChef
-    if AutoChef then
-        toggleChef.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        toggleChef.Text = "🍳 AUTO CHEF: ACTIVE"
-    else
-        toggleChef.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        toggleChef.Text = "🍳 AUTO CHEF: OFF"
-    end
-end)
+-- ==========================================
+-- 🖥️ PC STATUS TAB CONTENT
+-- ==========================================
+local statusHeader = Instance.new("TextLabel")
+statusHeader.Size = UDim2.new(0.9, 0, 0, 30)
+statusHeader.Position = UDim2.new(0.05, 0, 0, 10)
+statusHeader.BackgroundTransparency = 1
+statusHeader.TextColor3 = Color3.fromRGB(255, 255, 255)
+statusHeader.Text = "PC Status & Earnings"
+statusHeader.Font = Enum.Font.GothamBold
+statusHeader.TextSize = 14
+statusHeader.Parent = pcStatusTab
 
-toggleExtinguish.MouseButton1Click:Connect(function()
-    AutoExtinguish = not AutoExtinguish
-    if AutoExtinguish then
-        toggleExtinguish.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: ACTIVE"
-    else
-        toggleExtinguish.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: OFF"
-    end
-end)
+local refreshStatusBtn = Instance.new("TextButton")
+refreshStatusBtn.Size = UDim2.new(0.9, 0, 0, 30)
+refreshStatusBtn.Position = UDim2.new(0.05, 0, 0, 40)
+refreshStatusBtn.BackgroundColor3 = Color3.fromRGB(30, 100, 200)
+refreshStatusBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+refreshStatusBtn.Text = "🔄 Refresh PC List"
+refreshStatusBtn.Font = Enum.Font.GothamBold
+refreshStatusBtn.TextSize = 12
+refreshStatusBtn.Parent = pcStatusTab
+Instance.new("UICorner", refreshStatusBtn).CornerRadius = UDim.new(0, 6)
 
-toggleClean.MouseButton1Click:Connect(function()
-    AutoClean = not AutoClean
-    if AutoClean then
-        toggleClean.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        toggleClean.Text = "🧹 AUTO CLEAN (NIGHT): ACTIVE"
-    else
-        toggleClean.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        toggleClean.Text = "🧹 AUTO CLEAN (NIGHT): OFF"
+local pcStatusScroll = Instance.new("ScrollingFrame")
+pcStatusScroll.Size = UDim2.new(0.9, 0, 1, -90)
+pcStatusScroll.Position = UDim2.new(0.05, 0, 0, 80)
+pcStatusScroll.BackgroundTransparency = 1
+pcStatusScroll.ScrollBarThickness = 4
+pcStatusScroll.Parent = pcStatusTab
+local pcStatusLayout = Instance.new("UIListLayout", pcStatusScroll)
+pcStatusLayout.Padding = UDim.new(0, 8)
+
+local function populatePCStatus()
+    for _, child in ipairs(pcStatusScroll:GetChildren()) do if child:IsA("Frame") then child:Destroy() end end
+    
+    refreshCafePosition()
+    
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("ProximityPrompt") and obj.ActionText:lower():match("customize") then
+            local pos = obj.Parent and obj.Parent.Position
+            if pos and MyCafePos and (pos - MyCafePos).Magnitude < 200 then
+                local pcModel = obj.Parent.Parent
+                local pcName = pcModel and pcModel.Name or "Unknown PC"
+                
+                local totalPH = 0
+                local partsDesc = ""
+                
+                for _, cat in ipairs(PartCategories) do
+                    local catFolder = pcModel:FindFirstChild(cat)
+                    local equippedModel = catFolder and catFolder:FindFirstChildWhichIsA("Model")
+                    
+                    if equippedModel then
+                        local stats = ItemStatsDB[equippedModel.Name]
+                        local ph = stats and stats.PerHour or 0
+                        totalPH = totalPH + ph
+                        partsDesc = partsDesc .. cat .. ": " .. equippedModel.Name .. "\n"
+                    else
+                        partsDesc = partsDesc .. cat .. ": None\n"
+                    end
+                end
+                
+                local card = Instance.new("Frame")
+                card.Size = UDim2.new(1, 0, 0, 120)
+                card.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+                card.Parent = pcStatusScroll
+                Instance.new("UICorner", card).CornerRadius = UDim.new(0, 6)
+                
+                local titleLbl = Instance.new("TextLabel")
+                titleLbl.Size = UDim2.new(1, -10, 0, 25)
+                titleLbl.Position = UDim2.new(0, 5, 0, 5)
+                titleLbl.BackgroundTransparency = 1
+                titleLbl.TextColor3 = Color3.fromRGB(255, 215, 0)
+                titleLbl.Text = "🖥️ " .. pcName .. " | Earns: $" .. tostring(totalPH) .. "/hr"
+                titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+                titleLbl.Font = Enum.Font.GothamBold
+                titleLbl.TextSize = 13
+                titleLbl.Parent = card
+                
+                local partsLbl = Instance.new("TextLabel")
+                partsLbl.Size = UDim2.new(1, -10, 0, 85)
+                partsLbl.Position = UDim2.new(0, 5, 0, 30)
+                partsLbl.BackgroundTransparency = 1
+                partsLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
+                partsLbl.Text = partsDesc
+                partsLbl.TextXAlignment = Enum.TextXAlignment.Left
+                partsLbl.TextYAlignment = Enum.TextYAlignment.Top
+                partsLbl.Font = Enum.Font.Gotham
+                partsLbl.TextSize = 11
+                partsLbl.Parent = card
+            end
+        end
     end
-end)
+    task.wait(0.1)
+    pcStatusScroll.CanvasSize = UDim2.new(0, 0, 0, pcStatusLayout.AbsoluteContentSize.Y + 10)
+end
+
+refreshStatusBtn.MouseButton1Click:Connect(populatePCStatus)
 
 -- ==========================================
 -- DATA PROCESSING
@@ -704,12 +772,10 @@ local knownCPUs = {
 if ShopConfig and type(ShopConfig.Items) == "table" then
     for itemName, itemData in pairs(ShopConfig.Items) do
         local cat = itemData.Category or "Other"
-        
         if knownMousepads[itemName] then cat = "Mousepad"
         elseif knownCPUs[itemName] then cat = "CPU" end
         
         local itemEntry = { name = tostring(itemName), category = cat, stars = tonumber(itemData.Stars) or 0, price = tonumber(itemData.Price) or 0 }
-        
         if cat == "Grocery" then table.insert(guiItemsGrocery, itemEntry)
         else uniqueCats[cat] = true; table.insert(guiItemsPC, itemEntry) end
     end
@@ -878,7 +944,6 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
     local embedsArray = {}
     local pcParts = {}
     local mentionEveryone = false
-    
     local pcItemsToBuy = {}
     local groceryItemsToBuy = {}
     
@@ -887,28 +952,19 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
     if type(stockTable) == "table" then
         for itemName, quantity in pairs(stockTable) do
             if type(quantity) == "number" and quantity > 0 then
-                
                 local itemData = (ShopConfig and ShopConfig.Items and ShopConfig.Items[itemName]) or {}
                 local category = itemData.Category or "Others"
                 local isGrocery = (category == "Grocery")
                 
                 if isGrocery then
-                    if TargetItemsGrocery[itemName] and MasterGrocery then
-                        table.insert(groceryItemsToBuy, {name = itemName, qty = quantity})
-                    end
+                    if TargetItemsGrocery[itemName] and MasterGrocery then table.insert(groceryItemsToBuy, {name = itemName, qty = quantity}) end
                 else
                     local isTargeted = false
                     if TargetItemsPC[itemName] then
                         isTargeted = true
-                        if MasterPC then
-                            mentionEveryone = true
-                            table.insert(pcItemsToBuy, {name = itemName, qty = quantity})
-                        end
+                        if MasterPC then mentionEveryone = true; table.insert(pcItemsToBuy, {name = itemName, qty = quantity}) end
                     end
-                    local itemObj = {
-                        name = tostring(itemName), quantity = quantity, price = tonumber(itemData.Price) or 0,
-                        perHour = itemData.PerHour or 0, stars = tonumber(itemData.Stars) or 0, isTarget = isTargeted
-                    }
+                    local itemObj = { name = tostring(itemName), quantity = quantity, price = tonumber(itemData.Price) or 0, perHour = itemData.PerHour or 0, stars = tonumber(itemData.Stars) or 0, isTarget = isTargeted }
                     table.insert(pcParts, itemObj)
                 end
             end
@@ -985,21 +1041,15 @@ task.spawn(function()
                 for _, obj in ipairs(workspace:GetDescendants()) do
                     local name = obj.Name:lower()
                     if obj:IsA("ProximityPrompt") and (name:match("extinguish") or obj.ActionText:lower():match("extinguish") or obj.ObjectText:lower():match("fire")) then
-                        fireFound = obj
-                        firePart = obj.Parent
-                        isPrompt = true
-                        break
+                        fireFound = obj; firePart = obj.Parent; isPrompt = true break
                     elseif (obj:IsA("ParticleEmitter") or obj:IsA("Fire")) and (name:match("fire") or name:match("flame")) then
                         local part = obj.Parent
-                        if part and part:IsA("BasePart") then
-                            fireFound = obj
-                            firePart = part
-                            break
-                        end
+                        if part and part:IsA("BasePart") then fireFound = obj; firePart = part break end
                     end
                 end
                 
                 if fireFound and firePart then
+                    refreshCafePosition()
                     local targetPos = firePart.Position
                     if MyCafePos and (targetPos - MyCafePos).Magnitude > 200 then return end
                     
@@ -1015,23 +1065,16 @@ task.spawn(function()
                     
                     local extTool = nil
                     local backpack = player:FindFirstChild("Backpack")
-                    
                     if backpack then
                         for _, t in ipairs(backpack:GetChildren()) do
-                            if t:IsA("Tool") and (t.Name:lower():match("extinguish") or t.Name:lower():match("fire")) then
-                                extTool = t
-                                break
-                            end
+                            if t:IsA("Tool") and (t.Name:lower():match("extinguish") or t.Name:lower():match("fire")) then extTool = t break end
                         end
                     end
                     
                     if extTool then
                         humanoid:EquipTool(extTool)
                         local isEquipped = false
-                        for w = 1, 15 do
-                            if extTool.Parent == char then isEquipped = true break end
-                            task.wait(0.1)
-                        end
+                        for w = 1, 15 do if extTool.Parent == char then isEquipped = true break end task.wait(0.1) end
                         
                         if isEquipped then
                             for i = 1, 10 do
@@ -1085,15 +1128,13 @@ task.spawn(function()
                             local actionMatch = obj.ActionText:lower():match("clean")
                             local objectText = obj.ObjectText:lower()
                             if actionMatch and (objectText:match("mess") or objectText:match("glass")) then
-                                messFound = obj
-                                messPos = obj.Parent.Position
-                                messType = objectText:match("glass") and "glass" or "mess"
-                                break
+                                messFound = obj; messPos = obj.Parent.Position; messType = objectText:match("glass") and "glass" or "mess" break
                             end
                         end
                     end
                     
                     if messFound and messPos then
+                        refreshCafePosition()
                         if MyCafePos and (messPos - MyCafePos).Magnitude > 200 then return end
                         IsBusy = true 
                         humanoid:UnequipTools()
@@ -1111,20 +1152,14 @@ task.spawn(function()
                         
                         if backpack then
                             for _, t in ipairs(backpack:GetChildren()) do
-                                if t:IsA("Tool") and t.Name:lower():match(targetToolName) then
-                                    toolToEquip = t
-                                    break
-                                end
+                                if t:IsA("Tool") and t.Name:lower():match(targetToolName) then toolToEquip = t break end
                             end
                         end
                         
                         if toolToEquip then
                             humanoid:EquipTool(toolToEquip)
                             local isEquipped = false
-                            for w = 1, 15 do 
-                                if toolToEquip.Parent == char then isEquipped = true break end
-                                task.wait(0.1)
-                            end
+                            for w = 1, 15 do if toolToEquip.Parent == char then isEquipped = true break end task.wait(0.1) end
                             
                             if isEquipped then
                                 for i = 1, 8 do
@@ -1169,29 +1204,8 @@ task.spawn(function()
                 local serverFrame = mainUi and mainUi:FindFirstChild("ServerFrame")
                 
                 if hrp and serverFrame and not serverFrame.Visible then
+                    refreshCafePosition()
                     local closestPrompt = MyHomeLaptop
-                    
-                    if not closestPrompt or not closestPrompt.Parent then
-                        local shortestDistance = math.huge
-                        for _, obj in ipairs(workspace:GetDescendants()) do
-                            if obj:IsA("ProximityPrompt") then
-                                local n, o, a, pName = obj.Name:lower(), obj.ObjectText:lower(), obj.ActionText:lower(), (obj.Parent and obj.Parent.Name:lower() or "")
-                                if a:match("sit") or n:match("chair") or o:match("chair") or pName:match("chair") then continue end
-                                
-                                if n:match("laptop") or n:match("server") or o:match("laptop") or o:match("server") or pName:match("laptop") then
-                                    local part = obj.Parent
-                                    if part and part:IsA("BasePart") then
-                                        local dist = (hrp.Position - part.Position).Magnitude
-                                        if dist < shortestDistance and dist < 150 then
-                                            shortestDistance = dist
-                                            closestPrompt = obj
-                                        end
-                                    end
-                                end
-                            end
-                        end
-                        if closestPrompt then MyHomeLaptop = closestPrompt; MyCafePos = closestPrompt.Parent.Position end
-                    end
                     
                     local hasCustomer = false
                     local npcInfo = serverFrame:FindFirstChild("NpcInfo")
@@ -1296,6 +1310,7 @@ task.spawn(function()
                     if pcLabel then
                         local targetPCNumber = pcLabel.Text:match("%d+")
                         if targetPCNumber then
+                            refreshCafePosition()
                             local foundPC = nil
                             local shortestDist = 400 
                             local validPrefixes = {"pc", "desk", "table", "computer"}
