@@ -31,23 +31,64 @@ local ShopCFrame_PC = CFrame.new(-240.48721313476562, 7.888942718505859, 136.320
 local ShopCFrame_Grocery = CFrame.new(-102.66999816894531, 8.224592208862305, 10.839996337890625)
 
 -- ==========================================
--- CAFE RADAR (ACCURATE DETECTION)
+-- CAFE RADAR (BULLETPROOF DETECTION)
 -- ==========================================
 local function refreshCafePosition()
     local player = Players.LocalPlayer
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    
+    -- Attempt 1: Bases Attribute
     local bases = workspace:FindFirstChild("Bases")
     if bases then
         for _, base in ipairs(bases:GetChildren()) do
             if base:GetAttribute("OwnerUserId") == player.UserId then
                 if base:IsA("Model") then
                     MyCafePos = base:GetPivot().Position
+                    return
                 elseif base:IsA("BasePart") then
                     MyCafePos = base.Position
+                    return
                 end
-                return
             end
         end
     end
+    
+    -- Attempt 2: Find Laptop
+    if hrp then
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("ProximityPrompt") then
+                local n, o = obj.Name:lower(), obj.ObjectText:lower()
+                if n:match("laptop") or n:match("server") or o:match("laptop") or o:match("server") then
+                    if obj.Parent and obj.Parent:IsA("BasePart") then
+                        if (hrp.Position - obj.Parent.Position).Magnitude < 150 then
+                            MyCafePos = obj.Parent.Position
+                            return
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Attempt 3: Player's Current Position
+        MyCafePos = hrp.Position
+    end
+end
+
+local function getMyPCs()
+    refreshCafePosition()
+    local pcs = {}
+    if not MyCafePos then return pcs end
+    
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        -- Structural check: 100% accurate PC detection regardless of Prompt name
+        if obj:IsA("Model") and obj:FindFirstChild("Desktop") and obj:FindFirstChild("Monitor") and obj:FindFirstChild("Keyboard") then
+            local pos = obj:GetPivot().Position
+            if (pos - MyCafePos).Magnitude < 150 then
+                table.insert(pcs, obj)
+            end
+        end
+    end
+    return pcs
 end
 
 -- ==========================================
@@ -201,7 +242,6 @@ if CustomizeRemote then
     CustomizeRemote.OnClientEvent:Connect(function(pcModel, inventory)
         if not AutoUpgrade or typeof(inventory) ~= "table" or not pcModel then return end
         
-        -- Anti-Double Execution
         if _G.IsUpgradingPC then return end
         _G.IsUpgradingPC = true
         
@@ -246,8 +286,6 @@ if CustomizeRemote then
                     CustomizeRemote:FireServer(cat, best.Name)
                     hasChanges = true
                     table.insert(upgradesDone, "**" .. cat .. "**: `" .. current.Name .. "` ➔ `" .. best.Name .. "`")
-                    
-                    -- 🔥 FIX: 0.5s Wait bawat kabit para hindi i-ignore ng Server
                     task.wait(0.5) 
                 end
             end
@@ -259,7 +297,6 @@ if CustomizeRemote then
                 CancelCustomizeRemote:FireServer()
             end
             
-            -- Force Close UI para hindi makasagabal sa screen mo
             local pGui = Players.LocalPlayer:WaitForChild("PlayerGui")
             local customizeUI = pGui:FindFirstChild("Customize")
             if customizeUI then customizeUI.Enabled = false end
@@ -274,38 +311,31 @@ local function scanAndUpgradePCs()
     task.spawn(function()
         while IsShopping or IsBusy do task.wait(1) end
         
-        refreshCafePosition()
-        if not MyCafePos then return end 
+        local pcs = getMyPCs()
+        if #pcs == 0 then return end
         
         local prompts = {}
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("ProximityPrompt") and obj.ActionText:lower():match("customize") then
-                local pos = obj.Parent and obj.Parent.Position
-                if pos and (pos - MyCafePos).Magnitude < 150 then
-                    table.insert(prompts, obj)
-                end
+        for _, pcModel in ipairs(pcs) do
+            local prompt = pcModel:FindFirstChildWhichIsA("ProximityPrompt", true)
+            if prompt and prompt.Parent and prompt.Parent:IsA("BasePart") then
+                table.insert(prompts, {Prompt = prompt, Model = pcModel})
             end
         end
         
         if #prompts > 0 then
             IsBusy = true
             local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            local humanoid = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
             
             if hrp then
                 local originalPos = hrp.CFrame
                 
-                for _, prompt in ipairs(prompts) do
+                for _, data in ipairs(prompts) do
                     if IsShopping or not AutoUpgrade then break end
-                    CurrentTargetPCName = prompt.Parent and prompt.Parent.Parent and prompt.Parent.Parent.Name or "Unknown PC"
+                    CurrentTargetPCName = data.Model.Name
                     
-                    -- 🔥 FIX: Teleport at bigyan ang Server ng 0.5s na oras para ma-register
-                    hrp.CFrame = prompt.Parent.CFrame * CFrame.new(0, 3, 2.5)
+                    hrp.CFrame = data.Prompt.Parent.CFrame * CFrame.new(0, 3, 2.5)
                     task.wait(0.5) 
-                    
-                    firePrompt(prompt)
-                    
-                    -- Hayaang mag-process ang RemoteEvent
+                    firePrompt(data.Prompt)
                     task.wait(1.5) 
                 end
                 
@@ -316,7 +346,6 @@ local function scanAndUpgradePCs()
     end)
 end
 
--- 1-MINUTE INVISIBLE SCANNER
 task.spawn(function()
     while true do
         task.wait(60) 
@@ -705,64 +734,69 @@ local pcStatusLayout = Instance.new("UIListLayout", pcStatusScroll)
 pcStatusLayout.Padding = UDim.new(0, 8)
 
 local function populatePCStatus()
-    for _, child in ipairs(pcStatusScroll:GetChildren()) do if child:IsA("Frame") then child:Destroy() end end
+    for _, child in ipairs(pcStatusScroll:GetChildren()) do if child:IsA("Frame") or child:IsA("TextLabel") then child:Destroy() end end
     
-    refreshCafePosition()
+    local pcs = getMyPCs()
     
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("ProximityPrompt") and obj.ActionText:lower():match("customize") then
-            local pos = obj.Parent and obj.Parent.Position
-            if pos and MyCafePos and (pos - MyCafePos).Magnitude < 200 then
-                local pcModel = obj.Parent.Parent
-                local pcName = pcModel and pcModel.Name or "Unknown PC"
-                
-                local totalPH = 0
-                local partsDesc = ""
-                
-                for _, cat in ipairs(PartCategories) do
-                    local catFolder = pcModel:FindFirstChild(cat)
-                    local equippedModel = catFolder and catFolder:FindFirstChildWhichIsA("Model")
-                    
-                    if equippedModel then
-                        local stats = ItemStatsDB[equippedModel.Name]
-                        local ph = stats and stats.PerHour or 0
-                        totalPH = totalPH + ph
-                        partsDesc = partsDesc .. cat .. ": " .. equippedModel.Name .. "\n"
-                    else
-                        partsDesc = partsDesc .. cat .. ": None\n"
-                    end
-                end
-                
-                local card = Instance.new("Frame")
-                card.Size = UDim2.new(1, 0, 0, 120)
-                card.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-                card.Parent = pcStatusScroll
-                Instance.new("UICorner", card).CornerRadius = UDim.new(0, 6)
-                
-                local titleLbl = Instance.new("TextLabel")
-                titleLbl.Size = UDim2.new(1, -10, 0, 25)
-                titleLbl.Position = UDim2.new(0, 5, 0, 5)
-                titleLbl.BackgroundTransparency = 1
-                titleLbl.TextColor3 = Color3.fromRGB(255, 215, 0)
-                titleLbl.Text = "🖥️ " .. pcName .. " | Earns: $" .. tostring(totalPH) .. "/hr"
-                titleLbl.TextXAlignment = Enum.TextXAlignment.Left
-                titleLbl.Font = Enum.Font.GothamBold
-                titleLbl.TextSize = 13
-                titleLbl.Parent = card
-                
-                local partsLbl = Instance.new("TextLabel")
-                partsLbl.Size = UDim2.new(1, -10, 0, 85)
-                partsLbl.Position = UDim2.new(0, 5, 0, 30)
-                partsLbl.BackgroundTransparency = 1
-                partsLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
-                partsLbl.Text = partsDesc
-                partsLbl.TextXAlignment = Enum.TextXAlignment.Left
-                partsLbl.TextYAlignment = Enum.TextYAlignment.Top
-                partsLbl.Font = Enum.Font.Gotham
-                partsLbl.TextSize = 11
-                partsLbl.Parent = card
+    if #pcs == 0 then
+        local emptyMsg = Instance.new("TextLabel")
+        emptyMsg.Size = UDim2.new(1, 0, 0, 50)
+        emptyMsg.BackgroundTransparency = 1
+        emptyMsg.TextColor3 = Color3.fromRGB(255, 100, 100)
+        emptyMsg.Text = "❌ No PCs found! Make sure you are inside your Cafe."
+        emptyMsg.Font = Enum.Font.GothamBold
+        emptyMsg.TextSize = 13
+        emptyMsg.Parent = pcStatusScroll
+        return
+    end
+    
+    for _, pcModel in ipairs(pcs) do
+        local pcName = pcModel.Name
+        local totalPH = 0
+        local partsDesc = ""
+        
+        for _, cat in ipairs(PartCategories) do
+            local catFolder = pcModel:FindFirstChild(cat)
+            local equippedModel = catFolder and catFolder:FindFirstChildWhichIsA("Model")
+            
+            if equippedModel then
+                local stats = ItemStatsDB[equippedModel.Name]
+                local ph = stats and stats.PerHour or 0
+                totalPH = totalPH + ph
+                partsDesc = partsDesc .. cat .. ": " .. equippedModel.Name .. "\n"
+            else
+                partsDesc = partsDesc .. cat .. ": None\n"
             end
         end
+        
+        local card = Instance.new("Frame")
+        card.Size = UDim2.new(1, 0, 0, 120)
+        card.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+        card.Parent = pcStatusScroll
+        Instance.new("UICorner", card).CornerRadius = UDim.new(0, 6)
+        
+        local titleLbl = Instance.new("TextLabel")
+        titleLbl.Size = UDim2.new(1, -10, 0, 25)
+        titleLbl.Position = UDim2.new(0, 5, 0, 5)
+        titleLbl.BackgroundTransparency = 1
+        titleLbl.TextColor3 = Color3.fromRGB(255, 215, 0)
+        titleLbl.Text = "🖥️ " .. pcName .. " | Earns: $" .. tostring(totalPH) .. "/hr"
+        titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+        titleLbl.Font = Enum.Font.GothamBold
+        titleLbl.TextSize = 13
+        titleLbl.Parent = card
+        
+        local partsLbl = Instance.new("TextLabel")
+        partsLbl.Size = UDim2.new(1, -10, 0, 85)
+        partsLbl.Position = UDim2.new(0, 5, 0, 30)
+        partsLbl.BackgroundTransparency = 1
+        partsLbl.TextColor3 = Color3.fromRGB(200, 200, 200)
+        partsLbl.Text = partsDesc
+        partsLbl.TextXAlignment = Enum.TextXAlignment.Left
+        partsLbl.TextYAlignment = Enum.TextYAlignment.Top
+        partsLbl.Font = Enum.Font.Gotham
+        partsLbl.TextSize = 11
+        partsLbl.Parent = card
     end
     task.wait(0.1)
     pcStatusScroll.CanvasSize = UDim2.new(0, 0, 0, pcStatusLayout.AbsoluteContentSize.Y + 10)
