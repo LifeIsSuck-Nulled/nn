@@ -80,11 +80,24 @@ local function getMyPCs()
     if not MyCafePos then return pcs end
     
     for _, obj in ipairs(workspace:GetDescendants()) do
-        -- Structural check: 100% accurate PC detection regardless of Prompt name
         if obj:IsA("Model") and obj:FindFirstChild("Desktop") and obj:FindFirstChild("Monitor") and obj:FindFirstChild("Keyboard") then
             local pos = obj:GetPivot().Position
             if (pos - MyCafePos).Magnitude < 150 then
-                table.insert(pcs, obj)
+                -- 🔥 FIX: Siguraduhing Unlocked yung PC Slot
+                local isUnlocked = false
+                for _, prompt in ipairs(obj:GetDescendants()) do
+                    if prompt:IsA("ProximityPrompt") then
+                        local action = prompt.ActionText:lower()
+                        if action:match("customize") or action:match("edit") then
+                            isUnlocked = true
+                            break
+                        end
+                    end
+                end
+                
+                if isUnlocked then
+                    table.insert(pcs, obj)
+                end
             end
         end
     end
