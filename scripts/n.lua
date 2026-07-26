@@ -24,12 +24,31 @@ local TrackerWebhook = "https://discord.com/api/webhooks/1326732013750980618/Pn-
 local UpgradeWebhook = "https://discord.com/api/webhooks/1326732013750980618/Pn-nfG7dUBf9LBUzR8-sr__Y_WGg4SbfTQdmOMPAf3JG1KUXdjvK3YaB8hqgQZmh_par"
 local fetch = request or http_request or (syn and syn.request)
 
-local MyHomeLaptop = nil
 local MyCafePos = nil
 local CurrentTargetPCName = "Unknown PC"
 
 local ShopCFrame_PC = CFrame.new(-240.48721313476562, 7.888942718505859, 136.32080078125)
 local ShopCFrame_Grocery = CFrame.new(-102.66999816894531, 8.224592208862305, 10.839996337890625)
+
+-- ==========================================
+-- CAFE RADAR (NEW ACCURATE DETECTION)
+-- ==========================================
+local function refreshCafePosition()
+    local player = Players.LocalPlayer
+    local bases = workspace:FindFirstChild("Bases")
+    if bases then
+        for _, base in ipairs(bases:GetChildren()) do
+            if base:GetAttribute("OwnerUserId") == player.UserId then
+                if base:IsA("Model") then
+                    MyCafePos = base:GetPivot().Position
+                elseif base:IsA("BasePart") then
+                    MyCafePos = base.Position
+                end
+                return
+            end
+        end
+    end
+end
 
 -- ==========================================
 -- EXECUTION TRACKER
@@ -70,9 +89,8 @@ task.spawn(function()
                 hrp.Velocity = Vector3.new(0, 0, 0)
                 hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
                 
-                if MyHomeLaptop and MyHomeLaptop.Parent then
-                    hrp.CFrame = MyHomeLaptop.Parent.CFrame * CFrame.new(0, 4, 2.5)
-                elseif MyCafePos then
+                refreshCafePosition()
+                if MyCafePos then
                     hrp.CFrame = CFrame.new(MyCafePos) * CFrame.new(0, 5, 0)
                 else
                     hrp.CFrame = ShopCFrame_PC
@@ -144,27 +162,7 @@ local function sendUpgradeWebhook(pcName, upgradesList)
 end
 
 -- ==========================================
--- FIND CAFE POSITION HELPER
--- ==========================================
-local function refreshCafePosition()
-    local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not MyCafePos and hrp then
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("ProximityPrompt") and (obj.Name:lower():match("laptop") or obj.ObjectText:lower():match("laptop")) then
-                if obj.Parent and obj.Parent:IsA("BasePart") then
-                    if (hrp.Position - obj.Parent.Position).Magnitude < 200 then
-                        MyHomeLaptop = obj
-                        MyCafePos = obj.Parent.Position
-                        break
-                    end
-                end
-            end
-        end
-    end
-end
-
--- ==========================================
--- SMART AUTO UPGRADE LOGIC & 1-MINUTE SCANNER
+-- GHOST AUTO UPGRADE LOGIC & SCANNER
 -- ==========================================
 local ItemStatsDB = {}
 pcall(function()
@@ -251,12 +249,13 @@ local function scanAndUpgradePCs()
         while IsShopping or IsBusy do task.wait(1) end
         
         refreshCafePosition()
-        local prompts = {}
+        if not MyCafePos then return end -- Skip kung wala talagang cafe
         
+        local prompts = {}
         for _, obj in ipairs(workspace:GetDescendants()) do
             if obj:IsA("ProximityPrompt") and obj.ActionText:lower():match("customize") then
                 local pos = obj.Parent and obj.Parent.Position
-                if pos and MyCafePos and (pos - MyCafePos).Magnitude < 200 then
+                if pos and (pos - MyCafePos).Magnitude < 150 then
                     table.insert(prompts, obj)
                 end
             end
@@ -268,14 +267,16 @@ local function scanAndUpgradePCs()
             local humanoid = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
             
             if hrp then
+                -- 🔥 GHOST MODE: I-save ang original mong posisyon
+                local originalPos = hrp.CFrame
+                
                 for _, prompt in ipairs(prompts) do
                     if IsShopping or not AutoUpgrade then break end
+                    CurrentTargetPCName = prompt.Parent and prompt.Parent.Parent and prompt.Parent.Parent.Name or "Unknown PC"
                     
-                    CurrentTargetPCName = prompt.Parent.Parent and prompt.Parent.Parent.Name or "Unknown PC"
-                    
+                    -- Teleport sa PC para idaya ang server (0.1s lang)
                     hrp.CFrame = prompt.Parent.CFrame * CFrame.new(0, 3, 2.5)
-                    task.wait(0.3)
-                    if humanoid then humanoid.Sit = false end
+                    task.wait(0.1) 
                     
                     if fireproximityprompt then
                         local oldLOS = prompt.RequiresLineOfSight
@@ -284,17 +285,20 @@ local function scanAndUpgradePCs()
                         fireproximityprompt(prompt)
                         prompt.RequiresLineOfSight = oldLOS
                     end
-                    task.wait(1.5) 
+                    
+                    -- Maghintay nang konti para matanggap ang upgrade at ma-process
+                    task.wait(0.5) 
                 end
                 
-                if MyCafePos then hrp.CFrame = CFrame.new(MyCafePos) * CFrame.new(0, 5, 0) end
+                -- 🔥 GHOST MODE: Ibalik ka agad sa original mong pwesto
+                hrp.CFrame = originalPos
             end
             IsBusy = false
         end
     end)
 end
 
--- 1-MINUTE AUTO SCANNER
+-- 1-MINUTE INVISIBLE SCANNER
 task.spawn(function()
     while true do
         task.wait(60) 
@@ -544,6 +548,7 @@ local function secureBuy(shopId, itemsToBuy)
         end
         IsShopping = false
         
+        -- After sniping, ghost scan to equip new items instantly!
         if shopId == "PcParts" and AutoUpgrade then
             scanAndUpgradePCs()
         end
@@ -614,7 +619,7 @@ statusText.Size = UDim2.new(1, 0, 0, 30)
 statusText.Position = UDim2.new(0, 0, 0, 320)
 statusText.BackgroundTransparency = 1
 statusText.TextColor3 = Color3.fromRGB(150, 150, 150)
-statusText.Text = "Status: 🛡️ Anti-AFK & Anti-Death Active | 📡 Waiting..."
+statusText.Text = "Status: 🛡️ Smart Upgrade & Anti-Death Active | 📡 Waiting..."
 statusText.Font = Enum.Font.GothamSemibold
 statusText.TextSize = 12
 statusText.Parent = homeScroll
@@ -1205,7 +1210,23 @@ task.spawn(function()
                 
                 if hrp and serverFrame and not serverFrame.Visible then
                     refreshCafePosition()
-                    local closestPrompt = MyHomeLaptop
+                    local closestPrompt = nil
+                    
+                    for _, obj in ipairs(workspace:GetDescendants()) do
+                        if obj:IsA("ProximityPrompt") then
+                            local n, o, a = obj.Name:lower(), obj.ObjectText:lower(), obj.ActionText:lower()
+                            if not a:match("sit") and not n:match("chair") and not o:match("chair") then
+                                if n:match("laptop") or n:match("server") or o:match("laptop") or o:match("server") then
+                                    if obj.Parent and obj.Parent:IsA("BasePart") and MyCafePos then
+                                        if (obj.Parent.Position - MyCafePos).Magnitude < 150 then
+                                            closestPrompt = obj
+                                            break
+                                        end
+                                    end
+                                end
+                            end
+                        end
+                    end
                     
                     local hasCustomer = false
                     local npcInfo = serverFrame:FindFirstChild("NpcInfo")
