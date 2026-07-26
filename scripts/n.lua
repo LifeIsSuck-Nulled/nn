@@ -23,7 +23,10 @@ local fetch = request or http_request or (syn and syn.request)
 
 local MyHomeLaptop = nil
 local MyCafePos = nil
-local ShopCFrame = CFrame.new(-240.48721313476562, 7.888942718505859, 136.32080078125)
+
+-- Tiyak na lokasyon ng mga Shops
+local ShopCFrame_PC = CFrame.new(-240.48721313476562, 7.888942718505859, 136.32080078125)
+local ShopCFrame_Grocery = CFrame.new(-102.66999816894531, 8.224592208862305, 10.839996337890625)
 
 -- ==========================================
 -- EXECUTION TRACKER
@@ -73,7 +76,7 @@ task.spawn(function()
                     elseif MyCafePos then
                         hrp.CFrame = CFrame.new(MyCafePos) * CFrame.new(0, 5, 0)
                     else
-                        hrp.CFrame = ShopCFrame
+                        hrp.CFrame = ShopCFrame_PC
                     end
                 end
             end
@@ -337,78 +340,469 @@ tabButtons["Home"].BackgroundColor3 = Color3.fromRGB(50, 50, 60)
 tabButtons["Home"].TextColor3 = Color3.fromRGB(255, 255, 255)
 
 -- ==========================================
--- STRICT & SECURE SNIPE FUNCTION
+-- STRICT & SECURE SNIPE FUNCTION (MASTER BLOCKER)
 -- ==========================================
-local function secureBuy(shopId, itemsToBuy, requiresTP)
+local function secureBuy(shopId, itemsToBuy)
     task.spawn(function()
-        if requiresTP then
-            IsShopping = true
-            local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-            local returnCF = nil
+        -- 🔴 BLOCK ALL OTHER AUTOMATIONS HABANG BUMIBILI
+        IsShopping = true 
+        
+        local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        local returnCF = nil
+        
+        if hrp then
+            returnCF = hrp.CFrame
+            -- Teleport sa tamang shop
+            if shopId == "Grocery" then
+                hrp.CFrame = ShopCFrame_Grocery
+            else
+                hrp.CFrame = ShopCFrame_PC
+            end
+            -- HINTAYIN ANG SERVER NA MA-REHISTRO ANG POSISYON
+            task.wait(1.5)
+        end
+        
+        -- DOUBLE CHECK LOOP (Timeout reduced to 8 attempts = 4.8 seconds max wait para di mag hang)
+        for _, item in ipairs(itemsToBuy) do
+            local attempts = 0
+            local timeout = 8 
             
-            if hrp then
-                returnCF = hrp.CFrame
-                hrp.CFrame = ShopCFrame
-                task.wait(1.5)
+            while attempts < timeout do
+                attempts = attempts + 1
+                local stockData = nil
+                pcall(function() stockData = StockServiceModule:GetAll(shopId) end)
+                
+                local currentStock = (stockData and stockData[item.name]) or 0
+                
+                if type(currentStock) == "number" and currentStock > 0 then
+                    -- Bili at double check
+                    pcall(function() ShopPurchaseRemote:FireServer(shopId, item.name, currentStock) end)
+                    task.wait(0.6)
+                else
+                    -- Zero na ang stock o nakuha na, move on sa next
+                    break
+                end
             end
             
-            for _, item in ipairs(itemsToBuy) do
-                local attempts = 0
-                local timeout = 20
-                
-                while attempts < timeout do
-                    attempts = attempts + 1
-                    local stockData = nil
-                    pcall(function() stockData = StockServiceModule:GetAll(shopId) end)
+            if attempts >= timeout then
+                sendDebugLog("❌ **" .. shopId .. " SNIPE FAILED:** `" .. item.name .. "`\nNa-timeout sa pagbili (Possible walang pera o blocked ng server).")
+            end
+        end
+        
+        -- Pagkatapos mabili lahat, bumalik sa Cafe
+        task.wait(0.5)
+        if hrp and returnCF then
+            hrp.CFrame = returnCF
+            task.wait(0.2)
+        end
+        
+        -- 🟢 RELEASE BLOCKER (Pwede na ulit maglinis/luto/appoint)
+        IsShopping = false
+    end)
+end
+
+local function triggerInstantSnipe(shopId, targetDict)
+    task.spawn(function()
+        pcall(function()
+            if StockServiceModule and ShopPurchaseRemote then
+                local currentStock = StockServiceModule:GetAll(shopId)
+                if type(currentStock) == "table" then
+                    local itemsToBuy = {}
+                    for itemName, quantity in pairs(currentStock) do
+                        if type(quantity) == "number" and quantity > 0 and targetDict[itemName] then
+                            table.insert(itemsToBuy, {name = itemName, qty = quantity})
+                        end
+                    end
                     
-                    local currentStock = (stockData and stockData[item.name]) or 0
-                    
-                    if type(currentStock) == "number" and currentStock > 0 then
-                        pcall(function() ShopPurchaseRemote:FireServer(shopId, item.name, currentStock) end)
-                        task.wait(0.5)
-                    else
-                        break
+                    if #itemsToBuy > 0 then
+                        secureBuy(shopId, itemsToBuy)
                     end
                 end
-                
-                if attempts >= timeout then
-                    sendDebugLog("❌ **PC PART SNIPE FAILED:** `" .. item.name .. "`\nHindi mabili ang item at na-timeout.")
-                end
             end
-            
-            task.wait(0.5)
-            if hrp and returnCF then
-                hrp.CFrame = returnCF
-                task.wait(0.2)
-            end
-            IsShopping = false
+        end)
+    end)
+end
+
+-- ==========================================
+-- 🏠 HOME TAB CONTENT
+-- ==========================================
+local homeTitle = Instance.new("TextLabel")
+homeTitle.Size = UDim2.new(1, 0, 0, 30)
+homeTitle.BackgroundTransparency = 1
+homeTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
+homeTitle.Text = "Dashboard Controls"
+homeTitle.Font = Enum.Font.GothamBold
+homeTitle.TextSize = 16
+homeTitle.Parent = homeTab
+
+local togglePC = Instance.new("TextButton")
+togglePC.Size = UDim2.new(0.85, 0, 0, 35)
+togglePC.Position = UDim2.new(0.075, 0, 0.05, 0)
+togglePC.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+togglePC.TextColor3 = Color3.fromRGB(255, 255, 255)
+togglePC.Text = "💻 PC AUTO-BUY: OFF"
+togglePC.Font = Enum.Font.GothamBlack
+togglePC.TextSize = 13
+togglePC.Parent = homeTab
+Instance.new("UICorner", togglePC).CornerRadius = UDim.new(0, 6)
+
+local toggleGrocery = Instance.new("TextButton")
+toggleGrocery.Size = UDim2.new(0.85, 0, 0, 35)
+toggleGrocery.Position = UDim2.new(0.075, 0, 0.20, 0)
+toggleGrocery.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+toggleGrocery.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: OFF"
+toggleGrocery.Font = Enum.Font.GothamBlack
+toggleGrocery.TextSize = 13
+toggleGrocery.Parent = homeTab
+Instance.new("UICorner", toggleGrocery).CornerRadius = UDim.new(0, 6)
+
+local toggleAppoint = Instance.new("TextButton")
+toggleAppoint.Size = UDim2.new(0.85, 0, 0, 35)
+toggleAppoint.Position = UDim2.new(0.075, 0, 0.35, 0)
+toggleAppoint.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+toggleAppoint.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: OFF"
+toggleAppoint.Font = Enum.Font.GothamBlack
+toggleAppoint.TextSize = 13
+toggleAppoint.Parent = homeTab
+Instance.new("UICorner", toggleAppoint).CornerRadius = UDim.new(0, 6)
+
+local toggleChef = Instance.new("TextButton")
+toggleChef.Size = UDim2.new(0.85, 0, 0, 35)
+toggleChef.Position = UDim2.new(0.075, 0, 0.50, 0)
+toggleChef.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+toggleChef.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleChef.Text = "🍳 AUTO CHEF: OFF"
+toggleChef.Font = Enum.Font.GothamBlack
+toggleChef.TextSize = 13
+toggleChef.Parent = homeTab
+Instance.new("UICorner", toggleChef).CornerRadius = UDim.new(0, 6)
+
+local toggleExtinguish = Instance.new("TextButton")
+toggleExtinguish.Size = UDim2.new(0.85, 0, 0, 35)
+toggleExtinguish.Position = UDim2.new(0.075, 0, 0.65, 0)
+toggleExtinguish.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+toggleExtinguish.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: OFF"
+toggleExtinguish.Font = Enum.Font.GothamBlack
+toggleExtinguish.TextSize = 13
+toggleExtinguish.Parent = homeTab
+Instance.new("UICorner", toggleExtinguish).CornerRadius = UDim.new(0, 6)
+
+local toggleClean = Instance.new("TextButton")
+toggleClean.Size = UDim2.new(0.85, 0, 0, 35)
+toggleClean.Position = UDim2.new(0.075, 0, 0.80, 0)
+toggleClean.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+toggleClean.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleClean.Text = "🧹 AUTO CLEAN (NIGHT): OFF"
+toggleClean.Font = Enum.Font.GothamBlack
+toggleClean.TextSize = 13
+toggleClean.Parent = homeTab
+Instance.new("UICorner", toggleClean).CornerRadius = UDim.new(0, 6)
+
+local statusText = Instance.new("TextLabel")
+statusText.Size = UDim2.new(1, 0, 0, 30)
+statusText.Position = UDim2.new(0, 0, 0.91, 0)
+statusText.BackgroundTransparency = 1
+statusText.TextColor3 = Color3.fromRGB(150, 150, 150)
+statusText.Text = "Status: 🛡️ Anti-AFK & Anti-Death Active | 📡 Waiting for Server..."
+statusText.Font = Enum.Font.GothamSemibold
+statusText.TextSize = 12
+statusText.Parent = homeTab
+
+-- IBINALIK ANG MGA NAWALANG INSTANT SNIPE TRIGGERS
+togglePC.MouseButton1Click:Connect(function()
+    MasterPC = not MasterPC
+    if MasterPC then
+        togglePC.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+        togglePC.Text = "💻 PC AUTO-BUY: ACTIVE"
+        triggerInstantSnipe("PcParts", TargetItemsPC)
+    else
+        togglePC.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+        togglePC.Text = "💻 PC AUTO-BUY: OFF"
+    end
+end)
+
+toggleGrocery.MouseButton1Click:Connect(function()
+    MasterGrocery = not MasterGrocery
+    if MasterGrocery then
+        toggleGrocery.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+        toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: ACTIVE"
+        triggerInstantSnipe("Grocery", TargetItemsGrocery)
+    else
+        toggleGrocery.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+        toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: OFF"
+    end
+end)
+
+toggleAppoint.MouseButton1Click:Connect(function()
+    AutoAppoint = not AutoAppoint
+    if AutoAppoint then
+        toggleAppoint.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+        toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: ACTIVE"
+    else
+        toggleAppoint.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+        toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: OFF"
+    end
+end)
+
+toggleChef.MouseButton1Click:Connect(function()
+    AutoChef = not AutoChef
+    if AutoChef then
+        toggleChef.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+        toggleChef.Text = "🍳 AUTO CHEF: ACTIVE"
+    else
+        toggleChef.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+        toggleChef.Text = "🍳 AUTO CHEF: OFF"
+    end
+end)
+
+toggleExtinguish.MouseButton1Click:Connect(function()
+    AutoExtinguish = not AutoExtinguish
+    if AutoExtinguish then
+        toggleExtinguish.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+        toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: ACTIVE"
+    else
+        toggleExtinguish.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+        toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: OFF"
+    end
+end)
+
+toggleClean.MouseButton1Click:Connect(function()
+    AutoClean = not AutoClean
+    if AutoClean then
+        toggleClean.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+        toggleClean.Text = "🧹 AUTO CLEAN (NIGHT): ACTIVE"
+    else
+        toggleClean.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
+        toggleClean.Text = "🧹 AUTO CLEAN (NIGHT): OFF"
+    end
+end)
+
+-- ==========================================
+-- DATA PROCESSING
+-- ==========================================
+local guiItemsPC = {}
+local guiItemsGrocery = {}
+
+local uniqueCats = {
+    ["CPU"] = true,
+    ["Mousepad"] = true
+}
+
+local knownMousepads = {
+    ["Nocturne"] = true, ["Revv"] = true, ["Shadow"] = true, ["Horizon"] = true, ["Fuji"] = true,
+    ["Petal"] = true, ["Sora"] = true, ["Evergreen"] = true, ["Konoha"] = true, ["Kasumi"] = true,
+    ["Wavy"] = true, ["Hanami"] = true, ["Midnight"] = true, ["Azure"] = true, ["Ripple"] = true,
+    ["Hoshi"] = true, ["Japan"] = true, ["Nimbus"] = true, ["Slate"] = true, ["Collage"] = true
+}
+
+local knownCPUs = {
+    ["Snowdrift"] = true, ["PinkDrift"] = true, ["Dark Nexus"] = true, ["Sakura"] = true,
+    ["Polar X"] = true, ["Voltara"] = true, ["Hexora"] = true, ["Vesta"] = true,
+    ["Trifan-Core"] = true, ["Trifan-Lite"] = true, ["Flat Core"] = true, ["Pulse Core"] = true, ["Classic Core"] = true
+}
+
+if ShopConfig and type(ShopConfig.Items) == "table" then
+    for itemName, itemData in pairs(ShopConfig.Items) do
+        local cat = itemData.Category or "Other"
+        
+        if knownMousepads[itemName] then
+            cat = "Mousepad"
+        elseif knownCPUs[itemName] then
+            cat = "CPU"
+        end
+        
+        local itemEntry = {
+            name = tostring(itemName),
+            category = cat,
+            stars = tonumber(itemData.Stars) or 0,
+            price = tonumber(itemData.Price) or 0
+        }
+        
+        if cat == "Grocery" then
+            table.insert(guiItemsGrocery, itemEntry)
         else
-            for _, item in ipairs(itemsToBuy) do
-                local attempts = 0
-                local timeout = 20
-                
-                while attempts < timeout do
-                    attempts = attempts + 1
-                    local stockData = nil
-                    pcall(function() stockData = StockServiceModule:GetAll(shopId) end)
+            uniqueCats[cat] = true
+            table.insert(guiItemsPC, itemEntry)
+        end
+    end
+end
+
+local function sortItems(a, b)
+    if a.stars ~= b.stars then 
+        return a.stars > b.stars
+    else 
+        return a.price > b.price 
+    end
+end
+table.sort(guiItemsPC, sortItems)
+table.sort(guiItemsGrocery, sortItems)
+
+-- ==========================================
+-- 💻 PC PARTS TAB CONTENT
+-- ==========================================
+local pcDropdownBtn = Instance.new("TextButton")
+pcDropdownBtn.Size = UDim2.new(0.9, 0, 0, 30)
+pcDropdownBtn.Position = UDim2.new(0.05, 0, 0, 10)
+pcDropdownBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
+pcDropdownBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+pcDropdownBtn.Text = "Category: ALL ▼"
+pcDropdownBtn.Font = Enum.Font.GothamSemibold
+pcDropdownBtn.TextSize = 12
+pcDropdownBtn.Parent = pcTab
+Instance.new("UICorner", pcDropdownBtn).CornerRadius = UDim.new(0, 4)
+Instance.new("UIStroke", pcDropdownBtn).Color = Color3.fromRGB(60, 60, 70)
+
+local pcScroll = Instance.new("ScrollingFrame")
+pcScroll.Size = UDim2.new(0.9, 0, 1, -55)
+pcScroll.Position = UDim2.new(0.05, 0, 0, 45)
+pcScroll.BackgroundTransparency = 1
+pcScroll.ScrollBarThickness = 4
+pcScroll.Parent = pcTab
+local pcLayout = Instance.new("UIListLayout", pcScroll)
+pcLayout.Padding = UDim.new(0, 4)
+
+local pcDropdownFrame = Instance.new("ScrollingFrame")
+pcDropdownFrame.Size = UDim2.new(0.9, 0, 0, 150)
+pcDropdownFrame.Position = UDim2.new(0.05, 0, 0, 45)
+pcDropdownFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
+pcDropdownFrame.ScrollBarThickness = 4
+pcDropdownFrame.ZIndex = 10
+pcDropdownFrame.Visible = false
+pcDropdownFrame.Parent = pcTab
+Instance.new("UICorner", pcDropdownFrame)
+local pcDropLayout = Instance.new("UIListLayout", pcDropdownFrame)
+
+local currentPCFilter = "All"
+
+local function refreshPCList()
+    for _, child in ipairs(pcScroll:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
+    for _, item in ipairs(guiItemsPC) do
+        if currentPCFilter == "All" or item.category == currentPCFilter then
+            local btn = Instance.new("TextButton")
+            btn.Size = UDim2.new(1, 0, 0, 30)
+            btn.BackgroundColor3 = TargetItemsPC[item.name] and Color3.fromRGB(40, 160, 70) or Color3.fromRGB(35, 35, 40)
+            local starDisplay = string.rep("⭐", item.stars)
+            btn.Text = (TargetItemsPC[item.name] and " ☑ " or " ☐ ") .. item.name .. " " .. starDisplay
+            btn.TextXAlignment = Enum.TextXAlignment.Left
+            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            btn.Font = Enum.Font.GothamMedium
+            btn.TextSize = 12
+            btn.Parent = pcScroll
+            Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+            
+            btn.MouseButton1Click:Connect(function()
+                if TargetItemsPC[item.name] then
+                    TargetItemsPC[item.name] = nil
+                    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+                    btn.Text = " ☐ " .. item.name .. " " .. starDisplay
+                else
+                    TargetItemsPC[item.name] = true
+                    btn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+                    btn.Text = " ☑ " .. item.name .. " " .. starDisplay
                     
-                    local currentStock = (stockData and stockData[item.name]) or 0
-                    
-                    if type(currentStock) == "number" and currentStock > 0 then
-                        pcall(function() ShopPurchaseRemote:FireServer(shopId, item.name, currentStock) end)
-                        task.wait(0.5)
-                    else
-                        break
-                    end
+                    -- IBINALIK ANG TRIGGER KAPAG PININDOT ANG BUTTON
+                    if MasterPC then triggerInstantSnipe("PcParts", {[item.name] = true}) end
                 end
-                
-                if attempts >= timeout then
-                    sendDebugLog("❌ **GROCERY SNIPE FAILED:** `" .. item.name .. "`\nNa-timeout sa pagbili ng pagkain.")
-                end
-            end
+            end)
+        end
+    end
+    task.wait(0.1)
+    pcScroll.CanvasSize = UDim2.new(0, 0, 0, pcLayout.AbsoluteContentSize.Y + 10)
+end
+
+local sortedCategoryList = {"All"}
+local tempCatList = {}
+for c, _ in pairs(uniqueCats) do
+    table.insert(tempCatList, c)
+end
+table.sort(tempCatList)
+for _, c in ipairs(tempCatList) do
+    table.insert(sortedCategoryList, c)
+end
+
+for _, cat in ipairs(sortedCategoryList) do
+    local choiceBtn = Instance.new("TextButton")
+    choiceBtn.Size = UDim2.new(1, 0, 0, 30)
+    choiceBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+    choiceBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
+    choiceBtn.Text = cat
+    choiceBtn.Font = Enum.Font.GothamMedium
+    choiceBtn.TextSize = 12
+    choiceBtn.ZIndex = 11
+    choiceBtn.Parent = pcDropdownFrame
+    
+    choiceBtn.MouseButton1Click:Connect(function()
+        currentPCFilter = cat
+        pcDropdownBtn.Text = "Category: " .. string.upper(cat) .. " ▼"
+        pcDropdownFrame.Visible = false
+        refreshPCList()
+    end)
+end
+
+task.spawn(function()
+    task.wait(0.2)
+    pcDropdownFrame.CanvasSize = UDim2.new(0, 0, 0, pcDropLayout.AbsoluteContentSize.Y)
+end)
+
+pcDropdownBtn.MouseButton1Click:Connect(function() pcDropdownFrame.Visible = not pcDropdownFrame.Visible end)
+refreshPCList()
+
+-- ==========================================
+-- 🍎 GROCERY TAB CONTENT
+-- ==========================================
+local groceryHeader = Instance.new("TextLabel")
+groceryHeader.Size = UDim2.new(0.9, 0, 0, 30)
+groceryHeader.Position = UDim2.new(0.05, 0, 0, 10)
+groceryHeader.BackgroundTransparency = 1
+groceryHeader.TextColor3 = Color3.fromRGB(255, 255, 255)
+groceryHeader.Text = "Grocery & Food Selector"
+groceryHeader.Font = Enum.Font.GothamBold
+groceryHeader.TextSize = 14
+groceryHeader.Parent = groceryTab
+
+local grocScroll = Instance.new("ScrollingFrame")
+grocScroll.Size = UDim2.new(0.9, 0, 1, -55)
+grocScroll.Position = UDim2.new(0.05, 0, 0, 45)
+grocScroll.BackgroundTransparency = 1
+grocScroll.ScrollBarThickness = 4
+grocScroll.Parent = groceryTab
+local grocLayout = Instance.new("UIListLayout", grocScroll)
+grocLayout.Padding = UDim.new(0, 4)
+
+for _, item in ipairs(guiItemsGrocery) do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 30)
+    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+    btn.Text = " ☐ " .. item.name
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.GothamMedium
+    btn.TextSize = 12
+    btn.Parent = grocScroll
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
+    
+    btn.MouseButton1Click:Connect(function()
+        if TargetItemsGrocery[item.name] then
+            TargetItemsGrocery[item.name] = nil
+            btn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
+            btn.Text = " ☐ " .. item.name
+        else
+            TargetItemsGrocery[item.name] = true
+            btn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
+            btn.Text = " ☑ " .. item.name
+            
+            -- IBINALIK ANG TRIGGER KAPAG PININDOT ANG BUTTON
+            if MasterGrocery then triggerInstantSnipe("Grocery", {[item.name] = true}) end
         end
     end)
 end
+task.spawn(function()
+    task.wait(0.2)
+    grocScroll.CanvasSize = UDim2.new(0, 0, 0, grocLayout.AbsoluteContentSize.Y + 10)
+end)
 
 -- ==========================================
 -- AUTO EXTINGUISH LOOP 
@@ -458,7 +852,6 @@ task.spawn(function()
                     
                     local extTool = nil
                     
-                    -- Hanapin sa character at backpack specifically ang Fire Extinguisher
                     for _, t in ipairs(char:GetChildren()) do
                         if t:IsA("Tool") and (t.Name:lower():match("extinguish") or t.Name:lower():match("fire")) then
                             extTool = t
@@ -480,7 +873,6 @@ task.spawn(function()
                     if extTool then
                         humanoid:EquipTool(extTool)
                         
-                        -- CONFIRM NA NAKA-EQUIP
                         local isEquipped = false
                         for w = 1, 15 do
                             if extTool.Parent == char then
@@ -519,7 +911,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO CLEAN LOOP (STRICT CONFIRMATION & TOOL SELECTION)
+-- AUTO CLEAN LOOP
 -- ==========================================
 task.spawn(function()
     while true do
@@ -557,14 +949,12 @@ task.spawn(function()
                     if messFound and messPos then
                         if MyCafePos and (messPos - MyCafePos).Magnitude > 200 then return end
                         
-                        -- TELEPORT TO MESS
                         hrp.CFrame = CFrame.new(messPos) * CFrame.new(0, 2.5, 2.5)
                         task.wait(0.2)
                         hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(messPos.X, hrp.Position.Y, messPos.Z))
                         task.wait(0.3)
                         if humanoid then humanoid.Sit = false end
                         
-                        -- STRICT TOOL SELECTION
                         local targetToolName = (messType == "glass") and "towel" or "walis"
                         local toolToEquip = nil
                         
@@ -586,12 +976,10 @@ task.spawn(function()
                         end
                         
                         if toolToEquip then
-                            -- COMMAND EQUIP
                             humanoid:EquipTool(toolToEquip)
                             
-                            -- EQUIP CONFIRMATION LOOP (Hihintayin hawakan bago gumalaw)
                             local isEquipped = false
-                            for w = 1, 15 do -- Hihintayin hanggang 1.5s maximum
+                            for w = 1, 15 do 
                                 if toolToEquip.Parent == char then
                                     isEquipped = true
                                     break
@@ -600,9 +988,7 @@ task.spawn(function()
                             end
                             
                             if isEquipped then
-                                -- START CLEANING (Mabagal at maingat para maka-register)
                                 for i = 1, 8 do
-                                    -- Check kung hawak pa rin habang nagki-click (in case may kumuha bigla)
                                     if toolToEquip.Parent == char then
                                         toolToEquip:Activate()
                                         VirtualUser:ClickButton1(Vector2.new())
@@ -618,7 +1004,6 @@ task.spawn(function()
                                     task.wait(0.6) 
                                 end
                                 
-                                -- CONFIRM TAPOS NA BAGO BITAWAN
                                 task.wait(1.5) 
                                 humanoid:UnequipTools()
                                 task.wait(1)
@@ -944,378 +1329,6 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- 🏠 HOME TAB CONTENT
--- ==========================================
-local homeTitle = Instance.new("TextLabel")
-homeTitle.Size = UDim2.new(1, 0, 0, 30)
-homeTitle.BackgroundTransparency = 1
-homeTitle.TextColor3 = Color3.fromRGB(255, 255, 255)
-homeTitle.Text = "Dashboard Controls"
-homeTitle.Font = Enum.Font.GothamBold
-homeTitle.TextSize = 16
-homeTitle.Parent = homeTab
-
-local togglePC = Instance.new("TextButton")
-togglePC.Size = UDim2.new(0.85, 0, 0, 35)
-togglePC.Position = UDim2.new(0.075, 0, 0.05, 0)
-togglePC.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-togglePC.TextColor3 = Color3.fromRGB(255, 255, 255)
-togglePC.Text = "💻 PC AUTO-BUY: OFF"
-togglePC.Font = Enum.Font.GothamBlack
-togglePC.TextSize = 13
-togglePC.Parent = homeTab
-Instance.new("UICorner", togglePC).CornerRadius = UDim.new(0, 6)
-
-local toggleGrocery = Instance.new("TextButton")
-toggleGrocery.Size = UDim2.new(0.85, 0, 0, 35)
-toggleGrocery.Position = UDim2.new(0.075, 0, 0.20, 0)
-toggleGrocery.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-toggleGrocery.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: OFF"
-toggleGrocery.Font = Enum.Font.GothamBlack
-toggleGrocery.TextSize = 13
-toggleGrocery.Parent = homeTab
-Instance.new("UICorner", toggleGrocery).CornerRadius = UDim.new(0, 6)
-
-local toggleAppoint = Instance.new("TextButton")
-toggleAppoint.Size = UDim2.new(0.85, 0, 0, 35)
-toggleAppoint.Position = UDim2.new(0.075, 0, 0.35, 0)
-toggleAppoint.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-toggleAppoint.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: OFF"
-toggleAppoint.Font = Enum.Font.GothamBlack
-toggleAppoint.TextSize = 13
-toggleAppoint.Parent = homeTab
-Instance.new("UICorner", toggleAppoint).CornerRadius = UDim.new(0, 6)
-
-local toggleChef = Instance.new("TextButton")
-toggleChef.Size = UDim2.new(0.85, 0, 0, 35)
-toggleChef.Position = UDim2.new(0.075, 0, 0.50, 0)
-toggleChef.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-toggleChef.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleChef.Text = "🍳 AUTO CHEF: OFF"
-toggleChef.Font = Enum.Font.GothamBlack
-toggleChef.TextSize = 13
-toggleChef.Parent = homeTab
-Instance.new("UICorner", toggleChef).CornerRadius = UDim.new(0, 6)
-
-local toggleExtinguish = Instance.new("TextButton")
-toggleExtinguish.Size = UDim2.new(0.85, 0, 0, 35)
-toggleExtinguish.Position = UDim2.new(0.075, 0, 0.65, 0)
-toggleExtinguish.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-toggleExtinguish.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: OFF"
-toggleExtinguish.Font = Enum.Font.GothamBlack
-toggleExtinguish.TextSize = 13
-toggleExtinguish.Parent = homeTab
-Instance.new("UICorner", toggleExtinguish).CornerRadius = UDim.new(0, 6)
-
-local toggleClean = Instance.new("TextButton")
-toggleClean.Size = UDim2.new(0.85, 0, 0, 35)
-toggleClean.Position = UDim2.new(0.075, 0, 0.80, 0)
-toggleClean.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-toggleClean.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleClean.Text = "🧹 AUTO CLEAN (NIGHT): OFF"
-toggleClean.Font = Enum.Font.GothamBlack
-toggleClean.TextSize = 13
-toggleClean.Parent = homeTab
-Instance.new("UICorner", toggleClean).CornerRadius = UDim.new(0, 6)
-
-local statusText = Instance.new("TextLabel")
-statusText.Size = UDim2.new(1, 0, 0, 30)
-statusText.Position = UDim2.new(0, 0, 0.91, 0)
-statusText.BackgroundTransparency = 1
-statusText.TextColor3 = Color3.fromRGB(150, 150, 150)
-statusText.Text = "Status: 🛡️ Anti-AFK & Anti-Death Active | 📡 Waiting for Server..."
-statusText.Font = Enum.Font.GothamSemibold
-statusText.TextSize = 12
-statusText.Parent = homeTab
-
-togglePC.MouseButton1Click:Connect(function()
-    MasterPC = not MasterPC
-    if MasterPC then
-        togglePC.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        togglePC.Text = "💻 PC AUTO-BUY: ACTIVE"
-    else
-        togglePC.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        togglePC.Text = "💻 PC AUTO-BUY: OFF"
-    end
-end)
-
-toggleGrocery.MouseButton1Click:Connect(function()
-    MasterGrocery = not MasterGrocery
-    if MasterGrocery then
-        toggleGrocery.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: ACTIVE"
-    else
-        toggleGrocery.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        toggleGrocery.Text = "🍎 GROCERY AUTO-BUY: OFF"
-    end
-end)
-
-toggleAppoint.MouseButton1Click:Connect(function()
-    AutoAppoint = not AutoAppoint
-    if AutoAppoint then
-        toggleAppoint.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: ACTIVE"
-    else
-        toggleAppoint.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        toggleAppoint.Text = "🧑‍💻 AUTO APPOINT: OFF"
-    end
-end)
-
-toggleChef.MouseButton1Click:Connect(function()
-    AutoChef = not AutoChef
-    if AutoChef then
-        toggleChef.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        toggleChef.Text = "🍳 AUTO CHEF: ACTIVE"
-    else
-        toggleChef.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        toggleChef.Text = "🍳 AUTO CHEF: OFF"
-    end
-end)
-
-toggleExtinguish.MouseButton1Click:Connect(function()
-    AutoExtinguish = not AutoExtinguish
-    if AutoExtinguish then
-        toggleExtinguish.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: ACTIVE"
-    else
-        toggleExtinguish.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: OFF"
-    end
-end)
-
-toggleClean.MouseButton1Click:Connect(function()
-    AutoClean = not AutoClean
-    if AutoClean then
-        toggleClean.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        toggleClean.Text = "🧹 AUTO CLEAN (NIGHT): ACTIVE"
-    else
-        toggleClean.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        toggleClean.Text = "🧹 AUTO CLEAN (NIGHT): OFF"
-    end
-end)
-
--- ==========================================
--- DATA PROCESSING
--- ==========================================
-local guiItemsPC = {}
-local guiItemsGrocery = {}
-
-local uniqueCats = {
-    ["CPU"] = true,
-    ["Mousepad"] = true
-}
-
-local knownMousepads = {
-    ["Nocturne"] = true, ["Revv"] = true, ["Shadow"] = true, ["Horizon"] = true, ["Fuji"] = true,
-    ["Petal"] = true, ["Sora"] = true, ["Evergreen"] = true, ["Konoha"] = true, ["Kasumi"] = true,
-    ["Wavy"] = true, ["Hanami"] = true, ["Midnight"] = true, ["Azure"] = true, ["Ripple"] = true,
-    ["Hoshi"] = true, ["Japan"] = true, ["Nimbus"] = true, ["Slate"] = true, ["Collage"] = true
-}
-
-local knownCPUs = {
-    ["Snowdrift"] = true, ["PinkDrift"] = true, ["Dark Nexus"] = true, ["Sakura"] = true,
-    ["Polar X"] = true, ["Voltara"] = true, ["Hexora"] = true, ["Vesta"] = true,
-    ["Trifan-Core"] = true, ["Trifan-Lite"] = true, ["Flat Core"] = true, ["Pulse Core"] = true, ["Classic Core"] = true
-}
-
-if ShopConfig and type(ShopConfig.Items) == "table" then
-    for itemName, itemData in pairs(ShopConfig.Items) do
-        local cat = itemData.Category or "Other"
-        
-        if knownMousepads[itemName] then
-            cat = "Mousepad"
-        elseif knownCPUs[itemName] then
-            cat = "CPU"
-        end
-        
-        local itemEntry = {
-            name = tostring(itemName),
-            category = cat,
-            stars = tonumber(itemData.Stars) or 0,
-            price = tonumber(itemData.Price) or 0
-        }
-        
-        if cat == "Grocery" then
-            table.insert(guiItemsGrocery, itemEntry)
-        else
-            uniqueCats[cat] = true
-            table.insert(guiItemsPC, itemEntry)
-        end
-    end
-end
-
-local function sortItems(a, b)
-    if a.stars ~= b.stars then 
-        return a.stars > b.stars
-    else 
-        return a.price > b.price 
-    end
-end
-table.sort(guiItemsPC, sortItems)
-table.sort(guiItemsGrocery, sortItems)
-
--- ==========================================
--- 💻 PC PARTS TAB CONTENT
--- ==========================================
-local pcDropdownBtn = Instance.new("TextButton")
-pcDropdownBtn.Size = UDim2.new(0.9, 0, 0, 30)
-pcDropdownBtn.Position = UDim2.new(0.05, 0, 0, 10)
-pcDropdownBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 35)
-pcDropdownBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
-pcDropdownBtn.Text = "Category: ALL ▼"
-pcDropdownBtn.Font = Enum.Font.GothamSemibold
-pcDropdownBtn.TextSize = 12
-pcDropdownBtn.Parent = pcTab
-Instance.new("UICorner", pcDropdownBtn).CornerRadius = UDim.new(0, 4)
-Instance.new("UIStroke", pcDropdownBtn).Color = Color3.fromRGB(60, 60, 70)
-
-local pcScroll = Instance.new("ScrollingFrame")
-pcScroll.Size = UDim2.new(0.9, 0, 1, -55)
-pcScroll.Position = UDim2.new(0.05, 0, 0, 45)
-pcScroll.BackgroundTransparency = 1
-pcScroll.ScrollBarThickness = 4
-pcScroll.Parent = pcTab
-local pcLayout = Instance.new("UIListLayout", pcScroll)
-pcLayout.Padding = UDim.new(0, 4)
-
-local pcDropdownFrame = Instance.new("ScrollingFrame")
-pcDropdownFrame.Size = UDim2.new(0.9, 0, 0, 150)
-pcDropdownFrame.Position = UDim2.new(0.05, 0, 0, 45)
-pcDropdownFrame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
-pcDropdownFrame.ScrollBarThickness = 4
-pcDropdownFrame.ZIndex = 10
-pcDropdownFrame.Visible = false
-pcDropdownFrame.Parent = pcTab
-Instance.new("UICorner", pcDropdownFrame)
-local pcDropLayout = Instance.new("UIListLayout", pcDropdownFrame)
-
-local currentPCFilter = "All"
-
-local function refreshPCList()
-    for _, child in ipairs(pcScroll:GetChildren()) do if child:IsA("TextButton") then child:Destroy() end end
-    for _, item in ipairs(guiItemsPC) do
-        if currentPCFilter == "All" or item.category == currentPCFilter then
-            local btn = Instance.new("TextButton")
-            btn.Size = UDim2.new(1, 0, 0, 30)
-            btn.BackgroundColor3 = TargetItemsPC[item.name] and Color3.fromRGB(40, 160, 70) or Color3.fromRGB(35, 35, 40)
-            local starDisplay = string.rep("⭐", item.stars)
-            btn.Text = (TargetItemsPC[item.name] and " ☑ " or " ☐ ") .. item.name .. " " .. starDisplay
-            btn.TextXAlignment = Enum.TextXAlignment.Left
-            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            btn.Font = Enum.Font.GothamMedium
-            btn.TextSize = 12
-            btn.Parent = pcScroll
-            Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
-            
-            btn.MouseButton1Click:Connect(function()
-                if TargetItemsPC[item.name] then
-                    TargetItemsPC[item.name] = nil
-                    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-                    btn.Text = " ☐ " .. item.name .. " " .. starDisplay
-                else
-                    TargetItemsPC[item.name] = true
-                    btn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-                    btn.Text = " ☑ " .. item.name .. " " .. starDisplay
-                end
-            end)
-        end
-    end
-    task.wait(0.1)
-    pcScroll.CanvasSize = UDim2.new(0, 0, 0, pcLayout.AbsoluteContentSize.Y + 10)
-end
-
-local sortedCategoryList = {"All"}
-local tempCatList = {}
-for c, _ in pairs(uniqueCats) do
-    table.insert(tempCatList, c)
-end
-table.sort(tempCatList)
-for _, c in ipairs(tempCatList) do
-    table.insert(sortedCategoryList, c)
-end
-
-for _, cat in ipairs(sortedCategoryList) do
-    local choiceBtn = Instance.new("TextButton")
-    choiceBtn.Size = UDim2.new(1, 0, 0, 30)
-    choiceBtn.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-    choiceBtn.TextColor3 = Color3.fromRGB(200, 200, 200)
-    choiceBtn.Text = cat
-    choiceBtn.Font = Enum.Font.GothamMedium
-    choiceBtn.TextSize = 12
-    choiceBtn.ZIndex = 11
-    choiceBtn.Parent = pcDropdownFrame
-    
-    choiceBtn.MouseButton1Click:Connect(function()
-        currentPCFilter = cat
-        pcDropdownBtn.Text = "Category: " .. string.upper(cat) .. " ▼"
-        pcDropdownFrame.Visible = false
-        refreshPCList()
-    end)
-end
-
-task.spawn(function()
-    task.wait(0.2)
-    pcDropdownFrame.CanvasSize = UDim2.new(0, 0, 0, pcDropLayout.AbsoluteContentSize.Y)
-end)
-
-pcDropdownBtn.MouseButton1Click:Connect(function() pcDropdownFrame.Visible = not pcDropdownFrame.Visible end)
-refreshPCList()
-
--- ==========================================
--- 🍎 GROCERY TAB CONTENT
--- ==========================================
-local groceryHeader = Instance.new("TextLabel")
-groceryHeader.Size = UDim2.new(0.9, 0, 0, 30)
-groceryHeader.Position = UDim2.new(0.05, 0, 0, 10)
-groceryHeader.BackgroundTransparency = 1
-groceryHeader.TextColor3 = Color3.fromRGB(255, 255, 255)
-groceryHeader.Text = "Grocery & Food Selector"
-groceryHeader.Font = Enum.Font.GothamBold
-groceryHeader.TextSize = 14
-groceryHeader.Parent = groceryTab
-
-local grocScroll = Instance.new("ScrollingFrame")
-grocScroll.Size = UDim2.new(0.9, 0, 1, -55)
-grocScroll.Position = UDim2.new(0.05, 0, 0, 45)
-grocScroll.BackgroundTransparency = 1
-grocScroll.ScrollBarThickness = 4
-grocScroll.Parent = groceryTab
-local grocLayout = Instance.new("UIListLayout", grocScroll)
-grocLayout.Padding = UDim.new(0, 4)
-
-for _, item in ipairs(guiItemsGrocery) do
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 30)
-    btn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-    btn.Text = " ☐ " .. item.name
-    btn.TextXAlignment = Enum.TextXAlignment.Left
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Font = Enum.Font.GothamMedium
-    btn.TextSize = 12
-    btn.Parent = grocScroll
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 4)
-    
-    btn.MouseButton1Click:Connect(function()
-        if TargetItemsGrocery[item.name] then
-            TargetItemsGrocery[item.name] = nil
-            btn.BackgroundColor3 = Color3.fromRGB(35, 35, 40)
-            btn.Text = " ☐ " .. item.name
-        else
-            TargetItemsGrocery[item.name] = true
-            btn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-            btn.Text = " ☑ " .. item.name
-        end
-    end)
-end
-task.spawn(function()
-    task.wait(0.2)
-    grocScroll.CanvasSize = UDim2.new(0, 0, 0, grocLayout.AbsoluteContentSize.Y + 10)
-end)
-
--- ==========================================
 -- RESTOCK TRACKER
 -- ==========================================
 local stockSync = ReplicatedStorage:WaitForChild("StockServiceSync")
@@ -1361,11 +1374,11 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
     end
     
     if #groceryItemsToBuy > 0 then
-        secureBuy(shopId, groceryItemsToBuy, false)
+        secureBuy(shopId, groceryItemsToBuy)
     end
     
     if #pcItemsToBuy > 0 then
-        secureBuy(shopId, pcItemsToBuy, true)
+        secureBuy(shopId, pcItemsToBuy)
     end
     
     table.sort(pcParts, function(a, b)
