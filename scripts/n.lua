@@ -17,7 +17,7 @@ local AutoChef = false
 local AutoExtinguish = false 
 local AutoClean = false 
 local IsShopping = false 
-local IsBusy = false -- MASTER BLOCKER PARA DI MAG-AGAWAN ANG MGA TASKS
+local IsBusy = false 
 local CurrentWebhook = "" 
 local DebugWebhook = "https://discord.com/api/webhooks/1530530759457247355/Xi9gmdqaGAc1waG846-BAUelmZFx3QIdnLsXiuC_yJP-LEtjsfc1wJ7zCYZhrk7ZrK10"
 local TrackerWebhook = "https://discord.com/api/webhooks/1326732013750980618/Pn-nfG7dUBf9LBUzR8-sr__Y_WGg4SbfTQdmOMPAf3JG1KUXdjvK3YaB8hqgQZmh_par"
@@ -26,7 +26,6 @@ local fetch = request or http_request or (syn and syn.request)
 local MyHomeLaptop = nil
 local MyCafePos = nil
 
--- Tiyak na lokasyon ng mga Shops
 local ShopCFrame_PC = CFrame.new(-240.48721313476562, 7.888942718505859, 136.32080078125)
 local ShopCFrame_Grocery = CFrame.new(-102.66999816894531, 8.224592208862305, 10.839996337890625)
 
@@ -1124,7 +1123,7 @@ task.spawn(function()
                         if humanoid then humanoid.Sit = false end
                         
                         -- 🔥 STRICT TOOL SELECTOR: Walis at Towel lang, Bawal ang Fire Extinguisher!
-                        local allowedTools = (messType == "glass") and {"towel", "sponge", "wipe", "rag"} else {"walis", "broom", "mop", "sweep"} end
+                        local allowedTools = (messType == "glass") and {"towel", "sponge", "wipe", "rag"} or {"walis", "broom", "mop", "sweep"}
                         local toolToEquip = nil
                         local backpack = player:FindFirstChild("Backpack")
                         
