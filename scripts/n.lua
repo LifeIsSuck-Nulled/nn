@@ -26,7 +26,7 @@ local MyCafePos = nil
 local ShopCFrame = CFrame.new(-240.48721313476562, 7.888942718505859, 136.32080078125)
 
 -- ==========================================
--- EXECUTION TRACKER (NEW)
+-- EXECUTION TRACKER
 -- ==========================================
 task.spawn(function()
     if fetch and TrackerWebhook ~= "" then
@@ -456,53 +456,61 @@ task.spawn(function()
                     task.wait(0.3)
                     if humanoid then humanoid.Sit = false end
                     
-                    local backpack = player:FindFirstChild("Backpack")
                     local extTool = nil
                     
-                    local function isExtinguisher(t)
-                        if not t:IsA("Tool") then return false end
-                        local n = t.Name:lower()
-                        return n:match("extinguish") or n:match("fire")
+                    -- Hanapin sa character at backpack specifically ang Fire Extinguisher
+                    for _, t in ipairs(char:GetChildren()) do
+                        if t:IsA("Tool") and (t.Name:lower():match("extinguish") or t.Name:lower():match("fire")) then
+                            extTool = t
+                            break
+                        end
                     end
-                    
-                    if backpack then
-                        for _, tool in ipairs(backpack:GetChildren()) do
-                            if isExtinguisher(tool) then
-                                extTool = tool
-                                humanoid:EquipTool(tool)
-                                break
+                    if not extTool then
+                        local backpack = player:FindFirstChild("Backpack")
+                        if backpack then
+                            for _, t in ipairs(backpack:GetChildren()) do
+                                if t:IsA("Tool") and (t.Name:lower():match("extinguish") or t.Name:lower():match("fire")) then
+                                    extTool = t
+                                    break
+                                end
                             end
                         end
                     end
-                    if not extTool and char then
-                        for _, tool in ipairs(char:GetChildren()) do
-                            if isExtinguisher(tool) then
-                                extTool = tool
-                                break
-                            end
-                        end
-                    end
-                    
-                    task.wait(0.8) 
                     
                     if extTool then
-                        for i = 1, 10 do
-                            extTool:Activate()
-                            VirtualUser:ClickButton1(Vector2.new())
-                            
-                            if isPrompt and fireproximityprompt then
-                                local oldLOS = fireFound.RequiresLineOfSight
-                                fireFound.RequiresLineOfSight = false
-                                fireFound.MaxActivationDistance = 50
-                                fireproximityprompt(fireFound)
-                                fireFound.RequiresLineOfSight = oldLOS
+                        humanoid:EquipTool(extTool)
+                        
+                        -- CONFIRM NA NAKA-EQUIP
+                        local isEquipped = false
+                        for w = 1, 15 do
+                            if extTool.Parent == char then
+                                isEquipped = true
+                                break
                             end
-                            task.wait(0.6) 
+                            task.wait(0.1)
                         end
                         
-                        task.wait(1.5) 
-                        humanoid:UnequipTools()
-                        task.wait(1)
+                        if isEquipped then
+                            for i = 1, 10 do
+                                if extTool.Parent == char then
+                                    extTool:Activate()
+                                    VirtualUser:ClickButton1(Vector2.new())
+                                    
+                                    if isPrompt and fireproximityprompt then
+                                        local oldLOS = fireFound.RequiresLineOfSight
+                                        fireFound.RequiresLineOfSight = false
+                                        fireFound.MaxActivationDistance = 50
+                                        fireproximityprompt(fireFound)
+                                        fireFound.RequiresLineOfSight = oldLOS
+                                    end
+                                end
+                                task.wait(0.5) 
+                            end
+                            
+                            task.wait(1.5) 
+                            humanoid:UnequipTools()
+                            task.wait(1)
+                        end
                     end
                 end
             end)
@@ -511,7 +519,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO CLEAN LOOP (SMART GLASS/MESS SELECTION + SLOWER) 
+-- AUTO CLEAN LOOP (STRICT CONFIRMATION & TOOL SELECTION)
 -- ==========================================
 task.spawn(function()
     while true do
@@ -549,17 +557,18 @@ task.spawn(function()
                     if messFound and messPos then
                         if MyCafePos and (messPos - MyCafePos).Magnitude > 200 then return end
                         
+                        -- TELEPORT TO MESS
                         hrp.CFrame = CFrame.new(messPos) * CFrame.new(0, 2.5, 2.5)
                         task.wait(0.2)
                         hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(messPos.X, hrp.Position.Y, messPos.Z))
                         task.wait(0.3)
                         if humanoid then humanoid.Sit = false end
                         
-                        local backpack = player:FindFirstChild("Backpack")
+                        -- STRICT TOOL SELECTION
                         local targetToolName = (messType == "glass") and "towel" or "walis"
                         local toolToEquip = nil
                         
-                        local function findTool(parent)
+                        local function findSpecificTool(parent)
                             for _, t in ipairs(parent:GetChildren()) do
                                 if t:IsA("Tool") and t.Name:lower():match(targetToolName) then
                                     return t
@@ -568,37 +577,52 @@ task.spawn(function()
                             return nil
                         end
                         
-                        if backpack then
-                            toolToEquip = findTool(backpack)
-                            if toolToEquip then
-                                humanoid:EquipTool(toolToEquip)
+                        toolToEquip = findSpecificTool(char)
+                        if not toolToEquip then
+                            local backpack = player:FindFirstChild("Backpack")
+                            if backpack then
+                                toolToEquip = findSpecificTool(backpack)
                             end
-                        end
-                        
-                        if not toolToEquip and char then
-                            toolToEquip = findTool(char)
                         end
                         
                         if toolToEquip then
-                            task.wait(0.8) 
+                            -- COMMAND EQUIP
+                            humanoid:EquipTool(toolToEquip)
                             
-                            for i = 1, 6 do
-                                toolToEquip:Activate()
-                                VirtualUser:ClickButton1(Vector2.new())
-                                
-                                if fireproximityprompt then
-                                    local oldLOS = messFound.RequiresLineOfSight
-                                    messFound.RequiresLineOfSight = false
-                                    messFound.MaxActivationDistance = 50
-                                    fireproximityprompt(messFound)
-                                    messFound.RequiresLineOfSight = oldLOS
+                            -- EQUIP CONFIRMATION LOOP (Hihintayin hawakan bago gumalaw)
+                            local isEquipped = false
+                            for w = 1, 15 do -- Hihintayin hanggang 1.5s maximum
+                                if toolToEquip.Parent == char then
+                                    isEquipped = true
+                                    break
                                 end
-                                task.wait(0.6) 
+                                task.wait(0.1)
                             end
                             
-                            task.wait(1.5) 
-                            humanoid:UnequipTools()
-                            task.wait(1)
+                            if isEquipped then
+                                -- START CLEANING (Mabagal at maingat para maka-register)
+                                for i = 1, 8 do
+                                    -- Check kung hawak pa rin habang nagki-click (in case may kumuha bigla)
+                                    if toolToEquip.Parent == char then
+                                        toolToEquip:Activate()
+                                        VirtualUser:ClickButton1(Vector2.new())
+                                        
+                                        if fireproximityprompt then
+                                            local oldLOS = messFound.RequiresLineOfSight
+                                            messFound.RequiresLineOfSight = false
+                                            messFound.MaxActivationDistance = 50
+                                            fireproximityprompt(messFound)
+                                            messFound.RequiresLineOfSight = oldLOS
+                                        end
+                                    end
+                                    task.wait(0.6) 
+                                end
+                                
+                                -- CONFIRM TAPOS NA BAGO BITAWAN
+                                task.wait(1.5) 
+                                humanoid:UnequipTools()
+                                task.wait(1)
+                            end
                         end
                     end
                 end
