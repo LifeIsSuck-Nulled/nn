@@ -31,7 +31,7 @@ local ShopCFrame_PC = CFrame.new(-240.48721313476562, 7.888942718505859, 136.320
 local ShopCFrame_Grocery = CFrame.new(-102.66999816894531, 8.224592208862305, 10.839996337890625)
 
 -- ==========================================
--- CAFE RADAR (NEW ACCURATE DETECTION)
+-- CAFE RADAR (ACCURATE DETECTION)
 -- ==========================================
 local function refreshCafePosition()
     local player = Players.LocalPlayer
@@ -161,6 +161,17 @@ local function sendUpgradeWebhook(pcName, upgradesList)
     end)
 end
 
+local function firePrompt(prompt)
+    local oldLOS = prompt.RequiresLineOfSight
+    prompt.RequiresLineOfSight = false
+    if fireproximityprompt then
+        pcall(function() fireproximityprompt(prompt, 1) end)
+        pcall(function() fireproximityprompt(prompt, 0) end)
+        pcall(function() fireproximityprompt(prompt) end)
+    end
+    prompt.RequiresLineOfSight = oldLOS
+end
+
 -- ==========================================
 -- GHOST AUTO UPGRADE LOGIC & SCANNER
 -- ==========================================
@@ -190,56 +201,71 @@ if CustomizeRemote then
     CustomizeRemote.OnClientEvent:Connect(function(pcModel, inventory)
         if not AutoUpgrade or typeof(inventory) ~= "table" or not pcModel then return end
         
-        local hasChanges = false
-        local currentEquipped = {}
-        local upgradesDone = {}
+        -- Anti-Double Execution
+        if _G.IsUpgradingPC then return end
+        _G.IsUpgradingPC = true
         
-        for _, cat in ipairs(PartCategories) do
-            local catFolder = pcModel:FindFirstChild(cat)
-            if catFolder then
-                local equippedModel = catFolder:FindFirstChildWhichIsA("Model")
-                if equippedModel then
-                    local stats = ItemStatsDB[equippedModel.Name]
-                    currentEquipped[cat] = { Name = equippedModel.Name, PerHour = stats and stats.PerHour or 0 }
-                else
-                    currentEquipped[cat] = { Name = "None", PerHour = -1 }
+        task.spawn(function()
+            local hasChanges = false
+            local currentEquipped = {}
+            local upgradesDone = {}
+            
+            for _, cat in ipairs(PartCategories) do
+                local catFolder = pcModel:FindFirstChild(cat)
+                if catFolder then
+                    local equippedModel = catFolder:FindFirstChildWhichIsA("Model")
+                    if equippedModel then
+                        local stats = ItemStatsDB[equippedModel.Name]
+                        currentEquipped[cat] = { Name = equippedModel.Name, PerHour = stats and stats.PerHour or 0 }
+                    else
+                        currentEquipped[cat] = { Name = "None", PerHour = -1 }
+                    end
                 end
             end
-        end
-        
-        local bestInInv = {}
-        for invItemName, qty in pairs(inventory) do
-            if type(qty) == "number" and qty > 0 then
-                local stats = ItemStatsDB[invItemName]
-                if stats then
-                    local cat = stats.Category
-                    if cat == "CPU" then cat = "Desktop" end 
-                    
-                    if currentEquipped[cat] then
-                        if not bestInInv[cat] or stats.PerHour > bestInInv[cat].PerHour then
-                            bestInInv[cat] = { Name = invItemName, PerHour = stats.PerHour }
+            
+            local bestInInv = {}
+            for invItemName, qty in pairs(inventory) do
+                if type(qty) == "number" and qty > 0 then
+                    local stats = ItemStatsDB[invItemName]
+                    if stats then
+                        local cat = stats.Category
+                        if cat == "CPU" then cat = "Desktop" end 
+                        
+                        if currentEquipped[cat] then
+                            if not bestInInv[cat] or stats.PerHour > bestInInv[cat].PerHour then
+                                bestInInv[cat] = { Name = invItemName, PerHour = stats.PerHour }
+                            end
                         end
                     end
                 end
             end
-        end
-        
-        for cat, current in pairs(currentEquipped) do
-            local best = bestInInv[cat]
-            if best and best.PerHour > current.PerHour then
-                CustomizeRemote:FireServer(cat, best.Name)
-                hasChanges = true
-                table.insert(upgradesDone, "**" .. cat .. "**: `" .. current.Name .. "` ➔ `" .. best.Name .. "`")
-                task.wait(0.05)
+            
+            for cat, current in pairs(currentEquipped) do
+                local best = bestInInv[cat]
+                if best and best.PerHour > current.PerHour then
+                    CustomizeRemote:FireServer(cat, best.Name)
+                    hasChanges = true
+                    table.insert(upgradesDone, "**" .. cat .. "**: `" .. current.Name .. "` ➔ `" .. best.Name .. "`")
+                    
+                    -- 🔥 FIX: 0.5s Wait bawat kabit para hindi i-ignore ng Server
+                    task.wait(0.5) 
+                end
             end
-        end
-        
-        if hasChanges then
-            ConfirmCustomizeRemote:FireServer()
-            sendUpgradeWebhook(CurrentTargetPCName, upgradesDone)
-        else
-            CancelCustomizeRemote:FireServer()
-        end
+            
+            if hasChanges then
+                ConfirmCustomizeRemote:FireServer()
+                sendUpgradeWebhook(CurrentTargetPCName, upgradesDone)
+            else
+                CancelCustomizeRemote:FireServer()
+            end
+            
+            -- Force Close UI para hindi makasagabal sa screen mo
+            local pGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+            local customizeUI = pGui:FindFirstChild("Customize")
+            if customizeUI then customizeUI.Enabled = false end
+            
+            _G.IsUpgradingPC = false
+        end)
     end)
 end
 
@@ -249,7 +275,7 @@ local function scanAndUpgradePCs()
         while IsShopping or IsBusy do task.wait(1) end
         
         refreshCafePosition()
-        if not MyCafePos then return end -- Skip kung wala talagang cafe
+        if not MyCafePos then return end 
         
         local prompts = {}
         for _, obj in ipairs(workspace:GetDescendants()) do
@@ -267,30 +293,22 @@ local function scanAndUpgradePCs()
             local humanoid = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
             
             if hrp then
-                -- 🔥 GHOST MODE: I-save ang original mong posisyon
                 local originalPos = hrp.CFrame
                 
                 for _, prompt in ipairs(prompts) do
                     if IsShopping or not AutoUpgrade then break end
                     CurrentTargetPCName = prompt.Parent and prompt.Parent.Parent and prompt.Parent.Parent.Name or "Unknown PC"
                     
-                    -- Teleport sa PC para idaya ang server (0.1s lang)
+                    -- 🔥 FIX: Teleport at bigyan ang Server ng 0.5s na oras para ma-register
                     hrp.CFrame = prompt.Parent.CFrame * CFrame.new(0, 3, 2.5)
-                    task.wait(0.1) 
-                    
-                    if fireproximityprompt then
-                        local oldLOS = prompt.RequiresLineOfSight
-                        prompt.RequiresLineOfSight = false
-                        prompt.MaxActivationDistance = 50
-                        fireproximityprompt(prompt)
-                        prompt.RequiresLineOfSight = oldLOS
-                    end
-                    
-                    -- Maghintay nang konti para matanggap ang upgrade at ma-process
                     task.wait(0.5) 
+                    
+                    firePrompt(prompt)
+                    
+                    -- Hayaang mag-process ang RemoteEvent
+                    task.wait(1.5) 
                 end
                 
-                -- 🔥 GHOST MODE: Ibalik ka agad sa original mong pwesto
                 hrp.CFrame = originalPos
             end
             IsBusy = false
@@ -548,7 +566,6 @@ local function secureBuy(shopId, itemsToBuy)
         end
         IsShopping = false
         
-        -- After sniping, ghost scan to equip new items instantly!
         if shopId == "PcParts" and AutoUpgrade then
             scanAndUpgradePCs()
         end
