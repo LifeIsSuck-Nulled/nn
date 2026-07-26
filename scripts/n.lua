@@ -64,13 +64,12 @@ local function getMyPCs()
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("Model") and obj:FindFirstChild("Desktop") and obj:FindFirstChild("Monitor") and obj:FindFirstChild("Keyboard") then
             local pos = obj:GetPivot().Position
-            -- Pinaliit to 85 studs para hindi madamay ang kabilang shop
             if (pos - MyCafePos).Magnitude < 85 then
                 local isUnlocked = false
                 for _, prompt in ipairs(obj:GetDescendants()) do
                     if prompt:IsA("ProximityPrompt") then
                         local action = prompt.ActionText:lower()
-                        if action:match("customize") or action:match("edit") then
+                        if action:match("customize") or action:match("edit") or action:match("build") then
                             isUnlocked = true
                             break
                         end
@@ -174,11 +173,6 @@ local function sendWebhook(payload)
     pcall(function() fetch({Url = CurrentWebhook, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode(payload)}) end)
 end
 
-local function sendDebugLog(msg)
-    if not fetch or DebugWebhook == "" then return end
-    pcall(function() fetch({Url = DebugWebhook, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode({username = "Laba Debugger", content = "⚠️ **DEBUG LOG:**\n" .. msg})}) end)
-end
-
 local function sendUpgradeWebhook(pcName, upgradesList)
     if not fetch or UpgradeWebhook == "" then return end
     local desc = ""
@@ -204,22 +198,26 @@ local function sendUpgradeWebhook(pcName, upgradesList)
     end)
 end
 
+-- 🔥 BULLETPROOF PROMPT FIRE FOR EXECUTORS
 local function firePrompt(prompt)
-    local oldLOS = prompt.RequiresLineOfSight
-    local oldDist = prompt.MaxActivationDistance
-    prompt.RequiresLineOfSight = false
-    prompt.MaxActivationDistance = 50
-    if fireproximityprompt then
-        pcall(function() fireproximityprompt(prompt, 1) end)
-        pcall(function() fireproximityprompt(prompt, 0) end)
-        pcall(function() fireproximityprompt(prompt) end)
-    end
-    prompt.RequiresLineOfSight = oldLOS
-    prompt.MaxActivationDistance = oldDist
+    if not prompt or not prompt:IsA("ProximityPrompt") then return end
+    pcall(function()
+        prompt.RequiresLineOfSight = false
+        prompt.MaxActivationDistance = 9999
+        if fireproximityprompt then
+            fireproximityprompt(prompt, 0)
+            fireproximityprompt(prompt, 1)
+            fireproximityprompt(prompt)
+        elseif prompt.InputHoldBegin then
+            prompt:InputHoldBegin()
+            task.wait(prompt.HoldDuration or 0.1)
+            prompt:InputHoldEnd()
+        end
+    end)
 end
 
 -- ==========================================
--- GHOST AUTO UPGRADE LOGIC & SCANNER
+-- FULLY AUTOMATED GHOST UPGRADE LOGIC
 -- ==========================================
 local ItemStatsDB = {}
 pcall(function()
@@ -288,7 +286,7 @@ if CustomizeRemote then
                     pcall(function() CustomizeRemote:FireServer(cat, best.Name) end)
                     hasChanges = true
                     table.insert(upgradesDone, "**" .. cat .. "**: `" .. current.Name .. "` ➔ `" .. best.Name .. "`")
-                    task.wait(0.5) 
+                    task.wait(0.4) 
                 end
             end
             
@@ -299,9 +297,10 @@ if CustomizeRemote then
                 pcall(function() CancelCustomizeRemote:FireServer() end)
             end
             
+            -- Automatically Close UI after customizing
             pcall(function()
-                local pGui = Players.LocalPlayer:WaitForChild("PlayerGui", 3)
-                local customizeUI = pGui:FindFirstChild("Customize")
+                local pGui = Players.LocalPlayer:WaitForChild("PlayerGui", 2)
+                local customizeUI = pGui and pGui:FindFirstChild("Customize")
                 if customizeUI then customizeUI.Enabled = false end
             end)
         end)
@@ -319,10 +318,13 @@ local function scanAndUpgradePCs()
         local prompts = {}
         for _, pcModel in ipairs(pcs) do
             for _, prompt in ipairs(pcModel:GetDescendants()) do
-                if prompt:IsA("ProximityPrompt") and prompt.ActionText:lower():match("customize") then
-                    if prompt.Parent and prompt.Parent:IsA("BasePart") then
-                        table.insert(prompts, {Prompt = prompt, Model = pcModel})
-                        break
+                if prompt:IsA("ProximityPrompt") then
+                    local act = prompt.ActionText:lower()
+                    if act:match("customize") or act:match("edit") or act:match("build") then
+                        if prompt.Parent and prompt.Parent:IsA("BasePart") then
+                            table.insert(prompts, {Prompt = prompt, Model = pcModel})
+                            break
+                        end
                     end
                 end
             end
@@ -340,13 +342,14 @@ local function scanAndUpgradePCs()
                     if IsShopping or not AutoUpgrade then break end
                     CurrentTargetPCName = data.Model.Name
                     
-                    hrp.CFrame = CFrame.lookAt(data.Prompt.Parent.Position + Vector3.new(0, 2.5, 3), data.Prompt.Parent.Position)
-                    task.wait(0.4) 
+                    -- Teleport right next to prompt part
+                    hrp.CFrame = CFrame.lookAt(data.Prompt.Parent.Position + Vector3.new(0, 2, 2.5), data.Prompt.Parent.Position)
+                    task.wait(0.3) 
                     
                     if humanoid then humanoid.Sit = false end
                     firePrompt(data.Prompt)
                     
-                    task.wait(2.5) 
+                    task.wait(2) 
                 end
                 
                 hrp.CFrame = originalPos
@@ -356,6 +359,7 @@ local function scanAndUpgradePCs()
     end)
 end
 
+-- Automatic 60-second scanning loop
 task.spawn(function()
     while true do
         task.wait(60) 
@@ -708,7 +712,11 @@ toggleAppoint.MouseButton1Click:Connect(function() AutoAppoint = not AutoAppoint
 toggleChef.MouseButton1Click:Connect(function() AutoChef = not AutoChef; handleToggle(toggleChef, "🍳 AUTO CHEF", AutoChef) end)
 toggleExtinguish.MouseButton1Click:Connect(function() AutoExtinguish = not AutoExtinguish; handleToggle(toggleExtinguish, "🧯 AUTO EXTINGUISH", AutoExtinguish) end)
 toggleClean.MouseButton1Click:Connect(function() AutoClean = not AutoClean; handleToggle(toggleClean, "🧹 AUTO CLEAN (NIGHT)", AutoClean) end)
-toggleUpgrade.MouseButton1Click:Connect(function() AutoUpgrade = not AutoUpgrade; handleToggle(toggleUpgrade, "⚙️ AUTO UPGRADE", AutoUpgrade) end)
+toggleUpgrade.MouseButton1Click:Connect(function() 
+    AutoUpgrade = not AutoUpgrade
+    handleToggle(toggleUpgrade, "⚙️ AUTO UPGRADE", AutoUpgrade)
+    if AutoUpgrade then scanAndUpgradePCs() end
+end)
 
 -- ==========================================
 -- 🖥️ PC STATUS TAB CONTENT
