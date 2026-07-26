@@ -16,7 +16,7 @@ local AutoChef = false
 local AutoExtinguish = false 
 local AutoClean = false 
 local IsShopping = false 
-local IsBusy = false -- MASTER BLOCKER PARA DI MAG-AGAWAN ANG MGA TASKS
+local IsBusy = false 
 local CurrentWebhook = "" 
 local DebugWebhook = "https://discord.com/api/webhooks/1530530759457247355/Xi9gmdqaGAc1waG846-BAUelmZFx3QIdnLsXiuC_yJP-LEtjsfc1wJ7zCYZhrk7ZrK10"
 local TrackerWebhook = "https://discord.com/api/webhooks/1326732013750980618/Pn-nfG7dUBf9LBUzR8-sr__Y_WGg4SbfTQdmOMPAf3JG1KUXdjvK3YaB8hqgQZmh_par"
@@ -25,7 +25,6 @@ local fetch = request or http_request or (syn and syn.request)
 local MyHomeLaptop = nil
 local MyCafePos = nil
 
--- Tiyak na lokasyon ng mga Shops
 local ShopCFrame_PC = CFrame.new(-240.48721313476562, 7.888942718505859, 136.32080078125)
 local ShopCFrame_Grocery = CFrame.new(-102.66999816894531, 8.224592208862305, 10.839996337890625)
 
@@ -49,16 +48,13 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- ANTI-AFK SYSTEM
+-- ANTI-AFK & ANTI-DEATH SYSTEM
 -- ==========================================
 Players.LocalPlayer.Idled:Connect(function()
     VirtualUser:CaptureController()
     VirtualUser:ClickButton2(Vector2.new())
 end)
 
--- ==========================================
--- ANTI-DEATH / VOID SAVER 
--- ==========================================
 task.spawn(function()
     while true do
         task.wait(0.5)
@@ -67,18 +63,16 @@ task.spawn(function()
             local char = player.Character
             local hrp = char and char:FindFirstChild("HumanoidRootPart")
             
-            if hrp then
-                if hrp.Position.Y < -100 then
-                    hrp.Velocity = Vector3.new(0, 0, 0)
-                    hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-                    
-                    if MyHomeLaptop and MyHomeLaptop.Parent then
-                        hrp.CFrame = MyHomeLaptop.Parent.CFrame * CFrame.new(0, 4, 2.5)
-                    elseif MyCafePos then
-                        hrp.CFrame = CFrame.new(MyCafePos) * CFrame.new(0, 5, 0)
-                    else
-                        hrp.CFrame = ShopCFrame_PC
-                    end
+            if hrp and hrp.Position.Y < -100 then
+                hrp.Velocity = Vector3.new(0, 0, 0)
+                hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                
+                if MyHomeLaptop and MyHomeLaptop.Parent then
+                    hrp.CFrame = MyHomeLaptop.Parent.CFrame * CFrame.new(0, 4, 2.5)
+                elseif MyCafePos then
+                    hrp.CFrame = CFrame.new(MyCafePos) * CFrame.new(0, 5, 0)
+                else
+                    hrp.CFrame = ShopCFrame_PC
                 end
             end
         end)
@@ -91,6 +85,7 @@ end)
 local ShopConfig, StockServiceModule, Net
 local ShopPurchaseRemote, SelectPCRemote, AppointRemote
 local CookEvent, DeliverEvent, SelectTrayOrder
+local CustomizeRemote, ConfirmCustomizeRemote, CancelCustomizeRemote
 
 pcall(function()
     ShopConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Scripts"):WaitForChild("SHOP_CONFIG"))
@@ -104,37 +99,150 @@ pcall(function()
     CookEvent = Net:RemoteEvent("CookEvent")
     DeliverEvent = Net:RemoteEvent("DeliverEvent")
     SelectTrayOrder = Net:RemoteEvent("SelectTrayOrder")
+    
+    CustomizeRemote = Net:RemoteEvent("CustomizePC")
+    ConfirmCustomizeRemote = Net:RemoteEvent("ConfirmCustomize")
+    CancelCustomizeRemote = Net:RemoteEvent("CancelCustomize")
 end)
 
--- ==========================================
--- WEBHOOK HELPERS
--- ==========================================
 local function sendWebhook(payload)
     if not fetch or CurrentWebhook == "" then return end
-    pcall(function()
-        fetch({
-            Url = CurrentWebhook,
-            Method = "POST",
-            Headers = { ["Content-Type"] = "application/json" },
-            Body = HttpService:JSONEncode(payload)
-        })
-    end)
+    pcall(function() fetch({Url = CurrentWebhook, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode(payload)}) end)
 end
 
 local function sendDebugLog(msg)
     if not fetch or DebugWebhook == "" then return end
-    pcall(function()
-        fetch({
-            Url = DebugWebhook,
-            Method = "POST",
-            Headers = { ["Content-Type"] = "application/json" },
-            Body = HttpService:JSONEncode({
-                username = "Laba Debugger",
-                content = "⚠️ **DEBUG LOG:**\n" .. msg
-            })
-        })
+    pcall(function() fetch({Url = DebugWebhook, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode({username = "Laba Debugger", content = "⚠️ **DEBUG LOG:**\n" .. msg})}) end)
+end
+
+-- ==========================================
+-- SMART AUTO UPGRADE LOGIC (SILENT FEATURE)
+-- ==========================================
+local ItemStatsDB = {}
+pcall(function()
+    if ShopConfig then
+        if ShopConfig.PcParts then
+            for cat, items in pairs(ShopConfig.PcParts) do
+                for itemName, data in pairs(items) do
+                    ItemStatsDB[itemName] = { Category = cat, PerHour = tonumber(data.PerHour) or 0 }
+                end
+            end
+        end
+        if ShopConfig.Items then
+            for itemName, data in pairs(ShopConfig.Items) do
+                if not ItemStatsDB[itemName] then
+                    ItemStatsDB[itemName] = { Category = data.Category or "Other", PerHour = tonumber(data.PerHour) or 0 }
+                end
+            end
+        end
+    end
+end)
+
+local PartCategories = {"Chair", "Table", "Desktop", "Keyboard", "Mousepad", "Monitor"}
+
+if CustomizeRemote then
+    CustomizeRemote.OnClientEvent:Connect(function(pcModel, inventory)
+        if typeof(inventory) ~= "table" or not pcModel then return end
+        
+        local hasChanges = false
+        local currentEquipped = {}
+        
+        for _, cat in ipairs(PartCategories) do
+            local catFolder = pcModel:FindFirstChild(cat)
+            if catFolder then
+                local equippedModel = catFolder:FindFirstChildWhichIsA("Model")
+                if equippedModel then
+                    local stats = ItemStatsDB[equippedModel.Name]
+                    currentEquipped[cat] = { Name = equippedModel.Name, PerHour = stats and stats.PerHour or 0 }
+                else
+                    currentEquipped[cat] = { Name = nil, PerHour = -1 }
+                end
+            end
+        end
+        
+        local bestInInv = {}
+        for invItemName, qty in pairs(inventory) do
+            if type(qty) == "number" and qty > 0 then
+                local stats = ItemStatsDB[invItemName]
+                if stats then
+                    local cat = stats.Category
+                    if cat == "CPU" then cat = "Desktop" end 
+                    
+                    if currentEquipped[cat] then
+                        if not bestInInv[cat] or stats.PerHour > bestInInv[cat].PerHour then
+                            bestInInv[cat] = { Name = invItemName, PerHour = stats.PerHour }
+                        end
+                    end
+                end
+            end
+        end
+        
+        for cat, current in pairs(currentEquipped) do
+            local best = bestInInv[cat]
+            if best and best.PerHour > current.PerHour then
+                CustomizeRemote:FireServer(cat, best.Name)
+                hasChanges = true
+                task.wait(0.05)
+            end
+        end
+        
+        if hasChanges then
+            ConfirmCustomizeRemote:FireServer()
+            sendDebugLog("✅ **AUTO UPGRADE:** Equipped better parts on a PC!")
+        else
+            CancelCustomizeRemote:FireServer()
+        end
     end)
 end
+
+local function scanAndUpgradePCs()
+    task.spawn(function()
+        while IsShopping or IsBusy do task.wait(1) end
+        
+        local prompts = {}
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("ProximityPrompt") and obj.ActionText:lower():match("customize") then
+                local pos = obj.Parent and obj.Parent.Position
+                if pos and MyCafePos and (pos - MyCafePos).Magnitude < 200 then
+                    table.insert(prompts, obj)
+                end
+            end
+        end
+        
+        if #prompts > 0 then
+            IsBusy = true
+            local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            local humanoid = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
+            
+            if hrp then
+                for _, prompt in ipairs(prompts) do
+                    if IsShopping then break end
+                    
+                    hrp.CFrame = prompt.Parent.CFrame * CFrame.new(0, 3, 2.5)
+                    task.wait(0.3)
+                    if humanoid then humanoid.Sit = false end
+                    
+                    if fireproximityprompt then
+                        local oldLOS = prompt.RequiresLineOfSight
+                        prompt.RequiresLineOfSight = false
+                        prompt.MaxActivationDistance = 50
+                        fireproximityprompt(prompt)
+                        prompt.RequiresLineOfSight = oldLOS
+                    end
+                    task.wait(1.5) 
+                end
+                
+                if MyCafePos then hrp.CFrame = CFrame.new(MyCafePos) * CFrame.new(0, 5, 0) end
+            end
+            IsBusy = false
+        end
+    end)
+end
+
+task.spawn(function()
+    task.wait(10)
+    scanAndUpgradePCs()
+end)
 
 -- ==========================================
 -- UI SETUP (LABA BABY HUB)
@@ -148,9 +256,6 @@ gui.Name = guiName
 gui.ResetOnSpawn = false
 gui.Parent = playerGui
 
--- ==========================================
--- WEBHOOK LOGIN SCREEN
--- ==========================================
 local loginFrame = Instance.new("Frame")
 loginFrame.Size = UDim2.new(0, 350, 0, 180)
 loginFrame.Position = UDim2.new(0.5, -175, 0.5, -90)
@@ -214,9 +319,6 @@ skipBtn.TextSize = 14
 skipBtn.Parent = loginFrame
 Instance.new("UICorner", skipBtn).CornerRadius = UDim.new(0, 6)
 
--- ==========================================
--- MAIN HUB UI ELEMENTS
--- ==========================================
 local openBtn = Instance.new("TextButton")
 openBtn.Size = UDim2.new(0, 130, 0, 40)
 openBtn.Position = UDim2.new(0, 10, 0, 10)
@@ -246,7 +348,7 @@ launchBtn.MouseButton1Click:Connect(function()
         CurrentWebhook = inputStr
         loginFrame:Destroy() 
         openBtn.Visible = true 
-        sendWebhook({username = "Laba Baby Hub", embeds = {{title = "HUB CONNECTED", description = "Laba Baby Hub is Online. Toggles are OFF by default.", color = 3447003}}})
+        sendWebhook({username = "Laba Baby Hub", embeds = {{title = "HUB CONNECTED", description = "Laba Baby Hub is Online.", color = 3447003}}})
     else
         launchBtn.Text = "❌ INVALID WEBHOOK URL"
         launchBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
@@ -392,6 +494,11 @@ local function secureBuy(shopId, itemsToBuy)
         end
         
         IsShopping = false
+        
+        -- SCAN AND AUTO UPGRADE PCS AFTER BUYING NEW PARTS!
+        if shopId == "PcParts" then
+            scanAndUpgradePCs()
+        end
     end)
 end
 
@@ -500,7 +607,7 @@ statusText.Size = UDim2.new(1, 0, 0, 30)
 statusText.Position = UDim2.new(0, 0, 0.91, 0)
 statusText.BackgroundTransparency = 1
 statusText.TextColor3 = Color3.fromRGB(150, 150, 150)
-statusText.Text = "Status: 🛡️ Anti-AFK & Anti-Death Active | 📡 Waiting for Server..."
+statusText.Text = "Status: 🛡️ Smart Upgrade & Anti-Death Active | 📡 Waiting..."
 statusText.Font = Enum.Font.GothamSemibold
 statusText.TextSize = 12
 statusText.Parent = homeTab
@@ -579,10 +686,7 @@ end)
 local guiItemsPC = {}
 local guiItemsGrocery = {}
 
-local uniqueCats = {
-    ["CPU"] = true,
-    ["Mousepad"] = true
-}
+local uniqueCats = { ["CPU"] = true, ["Mousepad"] = true }
 
 local knownMousepads = {
     ["Nocturne"] = true, ["Revv"] = true, ["Shadow"] = true, ["Horizon"] = true, ["Fuji"] = true,
@@ -601,34 +705,18 @@ if ShopConfig and type(ShopConfig.Items) == "table" then
     for itemName, itemData in pairs(ShopConfig.Items) do
         local cat = itemData.Category or "Other"
         
-        if knownMousepads[itemName] then
-            cat = "Mousepad"
-        elseif knownCPUs[itemName] then
-            cat = "CPU"
-        end
+        if knownMousepads[itemName] then cat = "Mousepad"
+        elseif knownCPUs[itemName] then cat = "CPU" end
         
-        local itemEntry = {
-            name = tostring(itemName),
-            category = cat,
-            stars = tonumber(itemData.Stars) or 0,
-            price = tonumber(itemData.Price) or 0
-        }
+        local itemEntry = { name = tostring(itemName), category = cat, stars = tonumber(itemData.Stars) or 0, price = tonumber(itemData.Price) or 0 }
         
-        if cat == "Grocery" then
-            table.insert(guiItemsGrocery, itemEntry)
-        else
-            uniqueCats[cat] = true
-            table.insert(guiItemsPC, itemEntry)
-        end
+        if cat == "Grocery" then table.insert(guiItemsGrocery, itemEntry)
+        else uniqueCats[cat] = true; table.insert(guiItemsPC, itemEntry) end
     end
 end
 
 local function sortItems(a, b)
-    if a.stars ~= b.stars then 
-        return a.stars > b.stars
-    else 
-        return a.price > b.price 
-    end
+    if a.stars ~= b.stars then return a.stars > b.stars else return a.price > b.price end
 end
 table.sort(guiItemsPC, sortItems)
 table.sort(guiItemsGrocery, sortItems)
@@ -695,7 +783,6 @@ local function refreshPCList()
                     TargetItemsPC[item.name] = true
                     btn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
                     btn.Text = " ☑ " .. item.name .. " " .. starDisplay
-                    
                     if MasterPC then triggerInstantSnipe("PcParts", {[item.name] = true}) end
                 end
             end)
@@ -707,13 +794,9 @@ end
 
 local sortedCategoryList = {"All"}
 local tempCatList = {}
-for c, _ in pairs(uniqueCats) do
-    table.insert(tempCatList, c)
-end
+for c, _ in pairs(uniqueCats) do table.insert(tempCatList, c) end
 table.sort(tempCatList)
-for _, c in ipairs(tempCatList) do
-    table.insert(sortedCategoryList, c)
-end
+for _, c in ipairs(tempCatList) do table.insert(sortedCategoryList, c) end
 
 for _, cat in ipairs(sortedCategoryList) do
     local choiceBtn = Instance.new("TextButton")
@@ -734,11 +817,7 @@ for _, cat in ipairs(sortedCategoryList) do
     end)
 end
 
-task.spawn(function()
-    task.wait(0.2)
-    pcDropdownFrame.CanvasSize = UDim2.new(0, 0, 0, pcDropLayout.AbsoluteContentSize.Y)
-end)
-
+task.spawn(function() task.wait(0.2); pcDropdownFrame.CanvasSize = UDim2.new(0, 0, 0, pcDropLayout.AbsoluteContentSize.Y) end)
 pcDropdownBtn.MouseButton1Click:Connect(function() pcDropdownFrame.Visible = not pcDropdownFrame.Visible end)
 refreshPCList()
 
@@ -785,15 +864,11 @@ for _, item in ipairs(guiItemsGrocery) do
             TargetItemsGrocery[item.name] = true
             btn.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
             btn.Text = " ☑ " .. item.name
-            
             if MasterGrocery then triggerInstantSnipe("Grocery", {[item.name] = true}) end
         end
     end)
 end
-task.spawn(function()
-    task.wait(0.2)
-    grocScroll.CanvasSize = UDim2.new(0, 0, 0, grocLayout.AbsoluteContentSize.Y + 10)
-end)
+task.spawn(function() task.wait(0.2); grocScroll.CanvasSize = UDim2.new(0, 0, 0, grocLayout.AbsoluteContentSize.Y + 10) end)
 
 -- ==========================================
 -- RESTOCK TRACKER
@@ -840,20 +915,11 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
         end
     end
     
-    if #groceryItemsToBuy > 0 then
-        secureBuy(shopId, groceryItemsToBuy)
-    end
-    
-    if #pcItemsToBuy > 0 then
-        secureBuy(shopId, pcItemsToBuy)
-    end
+    if #groceryItemsToBuy > 0 then secureBuy(shopId, groceryItemsToBuy) end
+    if #pcItemsToBuy > 0 then secureBuy(shopId, pcItemsToBuy) end
     
     table.sort(pcParts, function(a, b)
-        if a.stars ~= b.stars then 
-            return a.stars > b.stars
-        else 
-            return a.price > b.price 
-        end
+        if a.stars ~= b.stars then return a.stars > b.stars else return a.price > b.price end
     end)
     
     local function buildEmbeds(itemList)
@@ -861,10 +927,7 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
         local fieldCount = 0
         local function packEmbed()
             if #currentFields > 0 then
-                table.insert(embedsArray, {
-                    title = "📦 " .. tostring(shopId) .. " - PC PARTS",
-                    color = 65280, fields = currentFields
-                })
+                table.insert(embedsArray, { title = "📦 " .. tostring(shopId) .. " - PC PARTS", color = 65280, fields = currentFields })
                 currentFields = {}
                 fieldCount = 0
             end
@@ -873,12 +936,9 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
             if #embedsArray >= 8 then break end 
             local safeName = item.name == "" and "Unknown Item" or item.name
             local displayName = item.isTarget and ("🎯 **" .. safeName:sub(1, 240) .. "**") or ("🔹 " .. safeName:sub(1, 250))
-            
             local starDisplay = string.rep("⭐", item.stars)
             if item.stars == 0 then starDisplay = "N/A" end
-            local statsDesc = string.format("📦 **Stock:** %d\n💵 **Price:** %s\n⚡ **Per Hour:** %s\n%s\n\u{200B}", 
-                item.quantity, tostring(item.price), tostring(item.perHour), starDisplay)
-                
+            local statsDesc = string.format("📦 **Stock:** %d\n💵 **Price:** %s\n⚡ **Per Hour:** %s\n%s\n\u{200B}", item.quantity, tostring(item.price), tostring(item.perHour), starDisplay)
             table.insert(currentFields, { name = displayName, value = statsDesc, inline = false })
             fieldCount = fieldCount + 1
             if fieldCount >= 25 then packEmbed() end
@@ -893,8 +953,7 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
     if StockServiceModule then pcall(function() nextRestockUnix = math.floor(currentUnix + StockServiceModule:TimeUntilRestock(shopId)) end) end
     
     table.insert(embedsArray, {
-        title = "⏱️ Info",
-        color = 3447003,
+        title = "⏱️ Info", color = 3447003,
         description = string.format("🔴 **Next Restock:** <t:%d:t> (<t:%d:R>)\n⚙️ **PC:** %s | **Grocery:** %s", nextRestockUnix, nextRestockUnix, (MasterPC and "🟢 ON" or "🔴 OFF"), (MasterGrocery and "🟢 ON" or "🔴 OFF")),
         footer = { text = "LABA BABY HUB" }, timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
     })
@@ -905,7 +964,7 @@ stockSync.OnClientEvent:Connect(function(shopId, stockTable)
 end)
 
 -- ==========================================
--- AUTO EXTINGUISH LOOP (ISBUSY FIX)
+-- AUTO EXTINGUISH LOOP 
 -- ==========================================
 task.spawn(function()
     while true do
@@ -944,9 +1003,7 @@ task.spawn(function()
                     local targetPos = firePart.Position
                     if MyCafePos and (targetPos - MyCafePos).Magnitude > 200 then return end
                     
-                    IsBusy = true -- LOCK TASKS
-                    
-                    -- Piliting bitawan lahat ng hawak bago bumunot para iwas bug
+                    IsBusy = true 
                     humanoid:UnequipTools()
                     task.wait(0.2)
                     
@@ -970,13 +1027,9 @@ task.spawn(function()
                     
                     if extTool then
                         humanoid:EquipTool(extTool)
-                        
                         local isEquipped = false
                         for w = 1, 15 do
-                            if extTool.Parent == char then
-                                isEquipped = true
-                                break
-                            end
+                            if extTool.Parent == char then isEquipped = true break end
                             task.wait(0.1)
                         end
                         
@@ -985,7 +1038,6 @@ task.spawn(function()
                                 if extTool.Parent == char then
                                     extTool:Activate()
                                     VirtualUser:ClickButton1(Vector2.new())
-                                    
                                     if isPrompt and fireproximityprompt then
                                         local oldLOS = fireFound.RequiresLineOfSight
                                         fireFound.RequiresLineOfSight = false
@@ -999,9 +1051,8 @@ task.spawn(function()
                             task.wait(1.5) 
                         end
                     end
-                    
                     humanoid:UnequipTools()
-                    IsBusy = false -- UNLOCK TASKS
+                    IsBusy = false 
                 end
             end)
         end
@@ -1009,7 +1060,7 @@ task.spawn(function()
 end)
 
 -- ==========================================
--- AUTO CLEAN LOOP (ISBUSY FIX)
+-- AUTO CLEAN LOOP
 -- ==========================================
 task.spawn(function()
     while true do
@@ -1018,7 +1069,6 @@ task.spawn(function()
             pcall(function()
                 local currentClockTime = Lighting.ClockTime
                 if currentClockTime >= 18 or currentClockTime <= 6 then
-                    
                     local player = Players.LocalPlayer
                     local char = player.Character
                     local hrp = char and char:FindFirstChild("HumanoidRootPart")
@@ -1034,7 +1084,6 @@ task.spawn(function()
                         if obj:IsA("ProximityPrompt") then
                             local actionMatch = obj.ActionText:lower():match("clean")
                             local objectText = obj.ObjectText:lower()
-                            
                             if actionMatch and (objectText:match("mess") or objectText:match("glass")) then
                                 messFound = obj
                                 messPos = obj.Parent.Position
@@ -1046,10 +1095,7 @@ task.spawn(function()
                     
                     if messFound and messPos then
                         if MyCafePos and (messPos - MyCafePos).Magnitude > 200 then return end
-                        
-                        IsBusy = true -- LOCK TASKS
-                        
-                        -- Piliting bitawan lahat ng hawak bago bumunot para iwas bug
+                        IsBusy = true 
                         humanoid:UnequipTools()
                         task.wait(0.2)
                         
@@ -1074,13 +1120,9 @@ task.spawn(function()
                         
                         if toolToEquip then
                             humanoid:EquipTool(toolToEquip)
-                            
                             local isEquipped = false
                             for w = 1, 15 do 
-                                if toolToEquip.Parent == char then
-                                    isEquipped = true
-                                    break
-                                end
+                                if toolToEquip.Parent == char then isEquipped = true break end
                                 task.wait(0.1)
                             end
                             
@@ -1089,7 +1131,6 @@ task.spawn(function()
                                     if toolToEquip.Parent == char then
                                         toolToEquip:Activate()
                                         VirtualUser:ClickButton1(Vector2.new())
-                                        
                                         if fireproximityprompt then
                                             local oldLOS = messFound.RequiresLineOfSight
                                             messFound.RequiresLineOfSight = false
@@ -1103,9 +1144,8 @@ task.spawn(function()
                                 task.wait(1.5) 
                             end
                         end
-                        
                         humanoid:UnequipTools()
-                        IsBusy = false -- UNLOCK TASKS
+                        IsBusy = false 
                     end
                 end
             end)
@@ -1129,12 +1169,10 @@ task.spawn(function()
                 local serverFrame = mainUi and mainUi:FindFirstChild("ServerFrame")
                 
                 if hrp and serverFrame and not serverFrame.Visible then
-                    
                     local closestPrompt = MyHomeLaptop
                     
                     if not closestPrompt or not closestPrompt.Parent then
                         local shortestDistance = math.huge
-                        
                         for _, obj in ipairs(workspace:GetDescendants()) do
                             if obj:IsA("ProximityPrompt") then
                                 local n, o, a, pName = obj.Name:lower(), obj.ObjectText:lower(), obj.ActionText:lower(), (obj.Parent and obj.Parent.Name:lower() or "")
@@ -1152,18 +1190,12 @@ task.spawn(function()
                                 end
                             end
                         end
-                        
-                        if closestPrompt then
-                            MyHomeLaptop = closestPrompt
-                            MyCafePos = closestPrompt.Parent.Position
-                        end
+                        if closestPrompt then MyHomeLaptop = closestPrompt; MyCafePos = closestPrompt.Parent.Position end
                     end
                     
                     local hasCustomer = false
                     local npcInfo = serverFrame:FindFirstChild("NpcInfo")
-                    if npcInfo and npcInfo.Visible then
-                        hasCustomer = true
-                    end
+                    if npcInfo and npcInfo.Visible then hasCustomer = true end
                     
                     if closestPrompt and not hasCustomer then
                         local laptopPos = closestPrompt.Parent.Position
@@ -1172,8 +1204,7 @@ task.spawn(function()
                                 local hum = obj:FindFirstChild("Humanoid")
                                 local root = obj:FindFirstChild("HumanoidRootPart") or obj.PrimaryPart
                                 if root and hum and not hum.Sit and (root.Position - laptopPos).Magnitude < 25 then
-                                    hasCustomer = true
-                                    break
+                                    hasCustomer = true break
                                 end
                             end
                         end
@@ -1240,9 +1271,7 @@ task.spawn(function()
                 local trayList = mainUi:FindFirstChild("Tray") and mainUi.Tray:FindFirstChild("ListFrame")
                 if trayList then
                     for _, v in ipairs(trayList:GetChildren()) do
-                        if v:IsA("Frame") and v:GetAttribute("TrayRuntimeCard") then
-                            table.insert(trayItems, v)
-                        end
+                        if v:IsA("Frame") and v:GetAttribute("TrayRuntimeCard") then table.insert(trayItems, v) end
                     end
                 end
                 
@@ -1252,18 +1281,13 @@ task.spawn(function()
                     
                     for _, item in ipairs(trayItems) do
                         local stroke = item:FindFirstChildWhichIsA("UIStroke")
-                        if stroke and stroke.Thickness == 4 then
-                            equippedItem = item
-                            break
-                        end
+                        if stroke and stroke.Thickness == 4 then equippedItem = item break end
                     end
                     
                     if not equippedItem then
                         local rawId = firstItem.Name:gsub("TrayOrder_", "")
                         local orderId = tonumber(rawId) or rawId 
-                        if SelectTrayOrder then
-                            SelectTrayOrder:FireServer(orderId)
-                        end
+                        if SelectTrayOrder then SelectTrayOrder:FireServer(orderId) end
                         task.wait(0.5)
                         return 
                     end
@@ -1271,7 +1295,6 @@ task.spawn(function()
                     local pcLabel = equippedItem:FindFirstChild("PcNumber")
                     if pcLabel then
                         local targetPCNumber = pcLabel.Text:match("%d+")
-                        
                         if targetPCNumber then
                             local foundPC = nil
                             local shortestDist = 400 
@@ -1281,36 +1304,21 @@ task.spawn(function()
                                 if obj:IsA("Model") or obj:IsA("Folder") or obj:IsA("BasePart") then
                                     local rawName = obj.Name:lower():gsub("%s+", ""):gsub("_", "")
                                     local isMatch = false
-                                    
-                                    if rawName == targetPCNumber then
-                                        isMatch = true
+                                    if rawName == targetPCNumber then isMatch = true
                                     else
                                         for _, prefix in ipairs(validPrefixes) do
-                                            if rawName == prefix .. targetPCNumber then
-                                                isMatch = true
-                                                break
-                                            end
+                                            if rawName == prefix .. targetPCNumber then isMatch = true break end
                                         end
                                     end
                                     
                                     if isMatch then
                                         local pos
-                                        if obj:IsA("Model") then
-                                            pos = obj.PrimaryPart and obj.PrimaryPart.Position or obj:GetModelCFrame().Position
-                                        elseif obj:IsA("BasePart") then
-                                            pos = obj.Position
-                                        end
-                                        
+                                        if obj:IsA("Model") then pos = obj.PrimaryPart and obj.PrimaryPart.Position or obj:GetModelCFrame().Position
+                                        elseif obj:IsA("BasePart") then pos = obj.Position end
                                         if pos then
-                                            if MyCafePos and (pos - MyCafePos).Magnitude > 200 then
-                                                continue 
-                                            end
-                                            
+                                            if MyCafePos and (pos - MyCafePos).Magnitude > 200 then continue end
                                             local dist = (hrp.Position - pos).Magnitude
-                                            if dist < shortestDist then
-                                                shortestDist = dist
-                                                foundPC = obj
-                                            end
+                                            if dist < shortestDist then shortestDist = dist; foundPC = obj end
                                         end
                                     end
                                 end
@@ -1319,11 +1327,8 @@ task.spawn(function()
                             if foundPC and not IsShopping then
                                 IsBusy = true
                                 local pcPos
-                                if foundPC:IsA("Model") then
-                                    pcPos = foundPC.PrimaryPart and foundPC.PrimaryPart.Position or foundPC:GetModelCFrame().Position
-                                else
-                                    pcPos = foundPC.Position
-                                end
+                                if foundPC:IsA("Model") then pcPos = foundPC.PrimaryPart and foundPC.PrimaryPart.Position or foundPC:GetModelCFrame().Position
+                                else pcPos = foundPC.Position end
                                 
                                 local targetNPC = nil
                                 local closestNPCDist = 15
@@ -1333,10 +1338,7 @@ task.spawn(function()
                                         local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
                                         if root then
                                             local dist = (root.Position - pcPos).Magnitude
-                                            if dist < closestNPCDist then
-                                                closestNPCDist = dist
-                                                targetNPC = model
-                                            end
+                                            if dist < closestNPCDist then closestNPCDist = dist; targetNPC = model end
                                         end
                                     end
                                 end
@@ -1345,9 +1347,7 @@ task.spawn(function()
                                     local npcRoot = targetNPC:FindFirstChild("HumanoidRootPart") or targetNPC.PrimaryPart
                                     local targetPos = (npcRoot.CFrame * CFrame.new(0, 0, 3.5)).Position + Vector3.new(0, 2.5, 0)
                                     hrp.CFrame = CFrame.lookAt(targetPos, npcRoot.Position)
-                                else
-                                    hrp.CFrame = CFrame.new(pcPos) * CFrame.new(0, 3, -4)
-                                end
+                                else hrp.CFrame = CFrame.new(pcPos) * CFrame.new(0, 3, -4) end
                                 
                                 task.wait(0.2)
                                 if humanoid then humanoid.Sit = false end
@@ -1361,7 +1361,6 @@ task.spawn(function()
                                                 if (part.Position - hrp.Position).Magnitude < 15 then
                                                     local a = prompt.ActionText:lower()
                                                     local o = prompt.ObjectText:lower()
-                                                    
                                                     if not a:match("sit") and not o:match("chair") and not o:match("seat") then 
                                                         local oldLOS = prompt.RequiresLineOfSight
                                                         prompt.RequiresLineOfSight = false
@@ -1373,7 +1372,6 @@ task.spawn(function()
                                         end
                                     end
                                 end
-                                
                                 task.wait(1)
                                 IsBusy = false
                             end
