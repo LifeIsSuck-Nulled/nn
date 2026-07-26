@@ -37,7 +37,6 @@ local function refreshCafePosition()
     local player = Players.LocalPlayer
     local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     
-    -- Attempt 1: Bases Attribute
     local bases = workspace:FindFirstChild("Bases")
     if bases then
         for _, base in ipairs(bases:GetChildren()) do
@@ -53,7 +52,6 @@ local function refreshCafePosition()
         end
     end
     
-    -- Attempt 2: Find Laptop
     if hrp then
         for _, obj in ipairs(workspace:GetDescendants()) do
             if obj:IsA("ProximityPrompt") then
@@ -68,8 +66,6 @@ local function refreshCafePosition()
                 end
             end
         end
-        
-        -- Attempt 3: Player's Current Position
         MyCafePos = hrp.Position
     end
 end
@@ -83,7 +79,6 @@ local function getMyPCs()
         if obj:IsA("Model") and obj:FindFirstChild("Desktop") and obj:FindFirstChild("Monitor") and obj:FindFirstChild("Keyboard") then
             local pos = obj:GetPivot().Position
             if (pos - MyCafePos).Magnitude < 150 then
-                -- 🔥 FIX: Siguraduhing Unlocked yung PC Slot
                 local isUnlocked = false
                 for _, prompt in ipairs(obj:GetDescendants()) do
                     if prompt:IsA("ProximityPrompt") then
@@ -94,13 +89,23 @@ local function getMyPCs()
                         end
                     end
                 end
-                
                 if isUnlocked then
                     table.insert(pcs, obj)
                 end
             end
         end
     end
+    
+    -- 🔥 NUMERIC SORTER: Ensures PC 1 comes before PC 2 and PC 10
+    table.sort(pcs, function(a, b)
+        local numA = tonumber(a.Name:match("%d+")) or 0
+        local numB = tonumber(b.Name:match("%d+")) or 0
+        if numA == numB then
+            return a.Name < b.Name
+        end
+        return numA < numB
+    end)
+    
     return pcs
 end
 
@@ -185,11 +190,6 @@ local function sendWebhook(payload)
     pcall(function() fetch({Url = CurrentWebhook, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode(payload)}) end)
 end
 
-local function sendDebugLog(msg)
-    if not fetch or DebugWebhook == "" then return end
-    pcall(function() fetch({Url = DebugWebhook, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode({username = "Laba Debugger", content = "⚠️ **DEBUG LOG:**\n" .. msg})}) end)
-end
-
 local function sendUpgradeWebhook(pcName, upgradesList)
     if not fetch or UpgradeWebhook == "" then return end
     local desc = ""
@@ -217,13 +217,16 @@ end
 
 local function firePrompt(prompt)
     local oldLOS = prompt.RequiresLineOfSight
+    local oldDist = prompt.MaxActivationDistance
     prompt.RequiresLineOfSight = false
+    prompt.MaxActivationDistance = 50
     if fireproximityprompt then
         pcall(function() fireproximityprompt(prompt, 1) end)
         pcall(function() fireproximityprompt(prompt, 0) end)
         pcall(function() fireproximityprompt(prompt) end)
     end
     prompt.RequiresLineOfSight = oldLOS
+    prompt.MaxActivationDistance = oldDist
 end
 
 -- ==========================================
@@ -254,9 +257,6 @@ local PartCategories = {"Chair", "Table", "Desktop", "Keyboard", "Mousepad", "Mo
 if CustomizeRemote then
     CustomizeRemote.OnClientEvent:Connect(function(pcModel, inventory)
         if not AutoUpgrade or typeof(inventory) ~= "table" or not pcModel then return end
-        
-        if _G.IsUpgradingPC then return end
-        _G.IsUpgradingPC = true
         
         task.spawn(function()
             local hasChanges = false
@@ -296,7 +296,7 @@ if CustomizeRemote then
             for cat, current in pairs(currentEquipped) do
                 local best = bestInInv[cat]
                 if best and best.PerHour > current.PerHour then
-                    CustomizeRemote:FireServer(cat, best.Name)
+                    pcall(function() CustomizeRemote:FireServer(cat, best.Name) end)
                     hasChanges = true
                     table.insert(upgradesDone, "**" .. cat .. "**: `" .. current.Name .. "` ➔ `" .. best.Name .. "`")
                     task.wait(0.5) 
@@ -304,17 +304,18 @@ if CustomizeRemote then
             end
             
             if hasChanges then
-                ConfirmCustomizeRemote:FireServer()
+                pcall(function() ConfirmCustomizeRemote:FireServer() end)
                 sendUpgradeWebhook(CurrentTargetPCName, upgradesDone)
             else
-                CancelCustomizeRemote:FireServer()
+                pcall(function() CancelCustomizeRemote:FireServer() end)
             end
             
-            local pGui = Players.LocalPlayer:WaitForChild("PlayerGui")
-            local customizeUI = pGui:FindFirstChild("Customize")
-            if customizeUI then customizeUI.Enabled = false end
-            
-            _G.IsUpgradingPC = false
+            -- Force Close UI
+            pcall(function()
+                local pGui = Players.LocalPlayer:WaitForChild("PlayerGui", 3)
+                local customizeUI = pGui:FindFirstChild("Customize")
+                if customizeUI then customizeUI.Enabled = false end
+            end)
         end)
     end)
 end
@@ -329,15 +330,20 @@ local function scanAndUpgradePCs()
         
         local prompts = {}
         for _, pcModel in ipairs(pcs) do
-            local prompt = pcModel:FindFirstChildWhichIsA("ProximityPrompt", true)
-            if prompt and prompt.Parent and prompt.Parent:IsA("BasePart") then
-                table.insert(prompts, {Prompt = prompt, Model = pcModel})
+            for _, prompt in ipairs(pcModel:GetDescendants()) do
+                if prompt:IsA("ProximityPrompt") and prompt.ActionText:lower():match("customize") then
+                    if prompt.Parent and prompt.Parent:IsA("BasePart") then
+                        table.insert(prompts, {Prompt = prompt, Model = pcModel})
+                        break
+                    end
+                end
             end
         end
         
         if #prompts > 0 then
             IsBusy = true
             local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            local humanoid = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChildWhichIsA("Humanoid")
             
             if hrp then
                 local originalPos = hrp.CFrame
@@ -346,10 +352,15 @@ local function scanAndUpgradePCs()
                     if IsShopping or not AutoUpgrade then break end
                     CurrentTargetPCName = data.Model.Name
                     
-                    hrp.CFrame = data.Prompt.Parent.CFrame * CFrame.new(0, 3, 2.5)
-                    task.wait(0.5) 
+                    -- Mas malapit at mas stable na teleport
+                    hrp.CFrame = CFrame.lookAt(data.Prompt.Parent.Position + Vector3.new(0, 2.5, 3), data.Prompt.Parent.Position)
+                    task.wait(0.4) 
+                    
+                    if humanoid then humanoid.Sit = false end
                     firePrompt(data.Prompt)
-                    task.wait(1.5) 
+                    
+                    -- Hayaang mag-process ang RemoteEvent bago lumipat sa next PC
+                    task.wait(2.5) 
                 end
                 
                 hrp.CFrame = originalPos
