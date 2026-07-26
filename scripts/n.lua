@@ -31,42 +31,28 @@ local ShopCFrame_PC = CFrame.new(-240.48721313476562, 7.888942718505859, 136.320
 local ShopCFrame_Grocery = CFrame.new(-102.66999816894531, 8.224592208862305, 10.839996337890625)
 
 -- ==========================================
--- CAFE RADAR (BULLETPROOF DETECTION)
+-- CAFE RADAR (STRICT OWNERSHIP DETECTION)
 -- ==========================================
 local function refreshCafePosition()
     local player = Players.LocalPlayer
-    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    
     local bases = workspace:FindFirstChild("Bases")
+    
     if bases then
         for _, base in ipairs(bases:GetChildren()) do
             if base:GetAttribute("OwnerUserId") == player.UserId then
-                if base:IsA("Model") then
+                if base:IsA("Attachment") then
+                    MyCafePos = base.WorldPosition
+                elseif base:IsA("Model") then
                     MyCafePos = base:GetPivot().Position
-                    return
                 elseif base:IsA("BasePart") then
                     MyCafePos = base.Position
-                    return
+                elseif base:IsA("Folder") then
+                    local part = base:FindFirstChildWhichIsA("BasePart", true)
+                    if part then MyCafePos = part.Position end
                 end
+                return
             end
         end
-    end
-    
-    if hrp then
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("ProximityPrompt") then
-                local n, o = obj.Name:lower(), obj.ObjectText:lower()
-                if n:match("laptop") or n:match("server") or o:match("laptop") or o:match("server") then
-                    if obj.Parent and obj.Parent:IsA("BasePart") then
-                        if (hrp.Position - obj.Parent.Position).Magnitude < 150 then
-                            MyCafePos = obj.Parent.Position
-                            return
-                        end
-                    end
-                end
-            end
-        end
-        MyCafePos = hrp.Position
     end
 end
 
@@ -78,7 +64,8 @@ local function getMyPCs()
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("Model") and obj:FindFirstChild("Desktop") and obj:FindFirstChild("Monitor") and obj:FindFirstChild("Keyboard") then
             local pos = obj:GetPivot().Position
-            if (pos - MyCafePos).Magnitude < 150 then
+            -- Pinaliit to 85 studs para hindi madamay ang kabilang shop
+            if (pos - MyCafePos).Magnitude < 85 then
                 local isUnlocked = false
                 for _, prompt in ipairs(obj:GetDescendants()) do
                     if prompt:IsA("ProximityPrompt") then
@@ -96,13 +83,10 @@ local function getMyPCs()
         end
     end
     
-    -- 🔥 NUMERIC SORTER: Ensures PC 1 comes before PC 2 and PC 10
     table.sort(pcs, function(a, b)
         local numA = tonumber(a.Name:match("%d+")) or 0
         local numB = tonumber(b.Name:match("%d+")) or 0
-        if numA == numB then
-            return a.Name < b.Name
-        end
+        if numA == numB then return a.Name < b.Name end
         return numA < numB
     end)
     
@@ -188,6 +172,11 @@ end)
 local function sendWebhook(payload)
     if not fetch or CurrentWebhook == "" then return end
     pcall(function() fetch({Url = CurrentWebhook, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode(payload)}) end)
+end
+
+local function sendDebugLog(msg)
+    if not fetch or DebugWebhook == "" then return end
+    pcall(function() fetch({Url = DebugWebhook, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode({username = "Laba Debugger", content = "⚠️ **DEBUG LOG:**\n" .. msg})}) end)
 end
 
 local function sendUpgradeWebhook(pcName, upgradesList)
@@ -310,7 +299,6 @@ if CustomizeRemote then
                 pcall(function() CancelCustomizeRemote:FireServer() end)
             end
             
-            -- Force Close UI
             pcall(function()
                 local pGui = Players.LocalPlayer:WaitForChild("PlayerGui", 3)
                 local customizeUI = pGui:FindFirstChild("Customize")
@@ -352,14 +340,12 @@ local function scanAndUpgradePCs()
                     if IsShopping or not AutoUpgrade then break end
                     CurrentTargetPCName = data.Model.Name
                     
-                    -- Mas malapit at mas stable na teleport
                     hrp.CFrame = CFrame.lookAt(data.Prompt.Parent.Position + Vector3.new(0, 2.5, 3), data.Prompt.Parent.Position)
                     task.wait(0.4) 
                     
                     if humanoid then humanoid.Sit = false end
                     firePrompt(data.Prompt)
                     
-                    -- Hayaang mag-process ang RemoteEvent bago lumipat sa next PC
                     task.wait(2.5) 
                 end
                 
@@ -1131,7 +1117,7 @@ task.spawn(function()
                 if fireFound and firePart then
                     refreshCafePosition()
                     local targetPos = firePart.Position
-                    if MyCafePos and (targetPos - MyCafePos).Magnitude > 200 then return end
+                    if MyCafePos and (targetPos - MyCafePos).Magnitude > 85 then return end
                     
                     IsBusy = true 
                     humanoid:UnequipTools()
@@ -1215,7 +1201,7 @@ task.spawn(function()
                     
                     if messFound and messPos then
                         refreshCafePosition()
-                        if MyCafePos and (messPos - MyCafePos).Magnitude > 200 then return end
+                        if MyCafePos and (messPos - MyCafePos).Magnitude > 85 then return end
                         IsBusy = true 
                         humanoid:UnequipTools()
                         task.wait(0.2)
@@ -1285,6 +1271,7 @@ task.spawn(function()
                 
                 if hrp and serverFrame and not serverFrame.Visible then
                     refreshCafePosition()
+                    if not MyCafePos then return end
                     local closestPrompt = nil
                     
                     for _, obj in ipairs(workspace:GetDescendants()) do
@@ -1292,8 +1279,8 @@ task.spawn(function()
                             local n, o, a = obj.Name:lower(), obj.ObjectText:lower(), obj.ActionText:lower()
                             if not a:match("sit") and not n:match("chair") and not o:match("chair") then
                                 if n:match("laptop") or n:match("server") or o:match("laptop") or o:match("server") then
-                                    if obj.Parent and obj.Parent:IsA("BasePart") and MyCafePos then
-                                        if (obj.Parent.Position - MyCafePos).Magnitude < 150 then
+                                    if obj.Parent and obj.Parent:IsA("BasePart") then
+                                        if (obj.Parent.Position - MyCafePos).Magnitude < 85 then
                                             closestPrompt = obj
                                             break
                                         end
@@ -1407,6 +1394,7 @@ task.spawn(function()
                         local targetPCNumber = pcLabel.Text:match("%d+")
                         if targetPCNumber then
                             refreshCafePosition()
+                            if not MyCafePos then return end
                             local foundPC = nil
                             local shortestDist = 400 
                             local validPrefixes = {"pc", "desk", "table", "computer"}
@@ -1427,7 +1415,7 @@ task.spawn(function()
                                         if obj:IsA("Model") then pos = obj.PrimaryPart and obj.PrimaryPart.Position or obj:GetModelCFrame().Position
                                         elseif obj:IsA("BasePart") then pos = obj.Position end
                                         if pos then
-                                            if MyCafePos and (pos - MyCafePos).Magnitude > 200 then continue end
+                                            if (pos - MyCafePos).Magnitude > 85 then continue end
                                             local dist = (hrp.Position - pos).Magnitude
                                             if dist < shortestDist then shortestDist = dist; foundPC = obj end
                                         end
