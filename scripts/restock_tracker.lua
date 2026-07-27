@@ -1,10 +1,10 @@
 --[[
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                    LABA BABY HUB - FIXED & IMPROVED                          ║
-║              Professional Roblox Automation Suite (v2.1)                     ║
+║              Professional Roblox Automation Suite (v2.2)                     ║
 ║                                                                              ║
 ║  FIXES: Syntax errors removed, Sniper logic improved, Tool matching refined, ║
-║         UI Login bug fixed, RESTORED MISSING PC & GROCERY LISTS!             ║
+║         UI Login bug fixed, RESTORED MISSING PC/GROCERY, SORTING BUG FIXED!  ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ]]
 
@@ -328,7 +328,7 @@ function Shopping.TriggerInstantSnipe(shopId, targetDict)
 end
 
 -- ============================================================================
--- 🌐 UI SYSTEM & DATA PROCESSING (RESTORED BY GEMINI)
+-- 🌐 UI SYSTEM & DATA PROCESSING
 -- ============================================================================
 local UISystem = {}
 local GUI_References = { ToggleButtons = {} }
@@ -414,7 +414,7 @@ end
 
 function UISystem.CreateMainHub(gui)
 	-- ================================================================
-	-- 🗃️ DATA PROCESSING (RESTORED MISSING LOGIC)
+	-- 🗃️ DATA PROCESSING 
 	-- ================================================================
 	local guiItemsPC = {}
 	local guiItemsGrocery = {}
@@ -443,8 +443,16 @@ function UISystem.CreateMainHub(gui)
 		end
 	end
 
-	table.sort(guiItemsPC, function(a, b) return a.stars ~= b.stars and a.stars > b.stars or a.price > b.price end)
-	table.sort(guiItemsGrocery, function(a, b) return a.stars ~= b.stars and a.stars > b.stars or a.price > b.price end)
+	-- ✅ FIXED SORTING FUNCTION (No more silent errors!)
+	local function sortItems(a, b)
+		if a.stars ~= b.stars then 
+			return a.stars > b.stars
+		else 
+			return a.price > b.price 
+		end
+	end
+	table.sort(guiItemsPC, sortItems)
+	table.sort(guiItemsGrocery, sortItems)
 
 	-- ================================================================
 	-- 🎨 UI GENERATION
@@ -453,11 +461,15 @@ function UISystem.CreateMainHub(gui)
 	openBtn.Size = UDim2.new(0, 130, 0, 40) openBtn.Position = UDim2.new(0, 10, 0, 10)
 	openBtn.BackgroundColor3 = Config.UI_THEME.BG_LIGHT openBtn.TextColor3 = Config.UI_THEME.TEXT_PRIMARY
 	openBtn.Text = "🎯 Open Menu" openBtn.Font = Enum.Font.GothamBold openBtn.TextSize = 14
-	openBtn.Parent = gui Instance.new("UICorner", openBtn).CornerRadius = UDim.new(0, 6)
+	openBtn.Visible = true -- ✅ LALABAS AGAD ANG OPEN MENU
+	openBtn.Parent = gui 
+	Instance.new("UICorner", openBtn).CornerRadius = UDim.new(0, 6)
 
 	local mainFrame = Instance.new("Frame")
 	mainFrame.Size = UDim2.new(0, 480, 0, 380) mainFrame.Position = UDim2.new(0.5, -240, 0.5, -190)
-	mainFrame.BackgroundColor3 = Config.UI_THEME.BG_DARK mainFrame.Draggable = true mainFrame.Parent = gui
+	mainFrame.BackgroundColor3 = Config.UI_THEME.BG_DARK mainFrame.Draggable = true 
+	mainFrame.Visible = false -- ✅ NAKATAGO MUNA ANG MAIN MENU (Katulad ng dati)
+	mainFrame.Parent = gui
 	Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 8) Instance.new("UIStroke", mainFrame).Color = Config.UI_THEME.BORDER
 
 	local closeBtn = Instance.new("TextButton")
@@ -570,7 +582,7 @@ function UISystem.CreateMainHub(gui)
 	statusText.Font = Enum.Font.GothamSemibold statusText.TextSize = 12 statusText.Parent = homeTab
 	GUI_References.StatusText = statusText
 
-	-- ========================================== PC TAB (RESTORED LOGIC) ==========================================
+	-- ========================================== PC TAB ==========================================
 	local pcDropdownBtn = Instance.new("TextButton")
 	pcDropdownBtn.Size = UDim2.new(0.9, 0, 0, 30) pcDropdownBtn.Position = UDim2.new(0.05, 0, 0, 10)
 	pcDropdownBtn.BackgroundColor3 = Config.UI_THEME.BG_LIGHT pcDropdownBtn.TextColor3 = Config.UI_THEME.TEXT_SECONDARY
@@ -638,7 +650,7 @@ function UISystem.CreateMainHub(gui)
 	pcDropdownBtn.MouseButton1Click:Connect(function() pcDropdownFrame.Visible = not pcDropdownFrame.Visible end)
 	refreshPCList()
 
-	-- ========================================== GROCERY TAB (RESTORED LOGIC) ==========================================
+	-- ========================================== GROCERY TAB ==========================================
 	local groceryHeader = Instance.new("TextLabel")
 	groceryHeader.Size = UDim2.new(0.9, 0, 0, 30) groceryHeader.Position = UDim2.new(0.05, 0, 0, 10)
 	groceryHeader.BackgroundTransparency = 1 groceryHeader.TextColor3 = Config.UI_THEME.TEXT_PRIMARY
@@ -1015,7 +1027,4 @@ end)
 -- ============================================================================
 -- ✅ INITIALIZATION COMPLETE
 -- ============================================================================
-print("✅ LABA BABY HUB v2.1 INITIALIZED - All systems ready")
-print("🔧 Fixes Applied:")
-print("  ✓ UI Generation for PC Parts & Grocery fully restored")
-print("  ✓ Login bug fixed")
+print("✅ LABA BABY HUB v2.2 INITIALIZED - All systems ready")
