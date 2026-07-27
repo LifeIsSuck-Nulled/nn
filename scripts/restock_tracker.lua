@@ -3,7 +3,8 @@
 ║                    LABA BABY HUB - FIXED & IMPROVED                          ║
 ║              Professional Roblox Automation Suite (v2.1)                     ║
 ║                                                                              ║
-║  FIXES: Syntax errors removed, Sniper logic improved, Tool matching refined ║
+║  FIXES: Syntax errors removed, Sniper logic improved, Tool matching refined, ║
+║         UI Login bug fixed (Open Menu button now works properly)             ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ]]
 
@@ -565,11 +566,12 @@ function UISystem.CreateLoginScreen()
 	skipBtn.Parent = loginFrame
 	Instance.new("UICorner", skipBtn).CornerRadius = UDim.new(0, 6)
 
+	-- ✅ FIXED: Removed .Parent from loginFrame so the GUI stays alive
 	launchBtn.MouseButton1Click:Connect(function()
 		local inputStr = webhookInput.Text
 		if inputStr ~= "" and (inputStr:match("http://") or inputStr:match("https://")) then
 			State.CurrentWebhook = inputStr
-			loginFrame.Parent:Destroy()
+			loginFrame:Destroy() 
 			UISystem.CreateMainHub(gui)
 			Webhook.User({
 				username = "Laba Baby Hub",
@@ -590,9 +592,10 @@ function UISystem.CreateLoginScreen()
 		end
 	end)
 
+	-- ✅ FIXED: Removed .Parent from loginFrame
 	skipBtn.MouseButton1Click:Connect(function()
 		State.CurrentWebhook = ""
-		loginFrame.Parent:Destroy()
+		loginFrame:Destroy()
 		UISystem.CreateMainHub(gui)
 	end)
 
@@ -1428,3 +1431,4 @@ print("🔧 Fixes Applied:")
 print("  ✓ Syntax errors removed (continue statements)")
 print("  ✓ Sniper logic improved (better retry mechanism)")
 print("  ✓ Tool matching refined (strict substring matching)")
+print("  ✓ UI Login bug fixed (Open Menu button works properly)")
