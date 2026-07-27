@@ -608,7 +608,7 @@ function UISystem.CreateMainHub(gui)
 	openBtn.Text = "🎯 Open Menu"
 	openBtn.Font = Enum.Font.GothamBold
 	openBtn.TextSize = 14
-	openBtn.Visible = false
+	openBtn.Visible = true
 	openBtn.Parent = gui
 	Instance.new("UICorner", openBtn).CornerRadius = UDim.new(0, 6)
 
