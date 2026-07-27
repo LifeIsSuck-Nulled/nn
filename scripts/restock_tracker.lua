@@ -616,7 +616,7 @@ function UISystem.CreateMainHub(gui)
 	mainFrame.Size = UDim2.new(0, 480, 0, 380)
 	mainFrame.Position = UDim2.new(0.5, -240, 0.5, -190)
 	mainFrame.BackgroundColor3 = Config.UI_THEME.BG_DARK
-	mainFrame.Visible = false
+	mainFrame.Visible = true
 	mainFrame.Active = true
 	mainFrame.Draggable = true
 	mainFrame.Parent = gui
