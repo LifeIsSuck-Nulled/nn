@@ -1,7 +1,7 @@
 --[[
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                    LABA BABY HUB - FIXED & OPTIMIZED                         ║
-║  UI Design: Original (100% Working) | Loops & Logic: Fully Optimized         ║
+║  UPDATE: Removed Auto-Extinguish to prevent tool conflicts. 100% Stable!     ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 ]]
 
@@ -21,7 +21,6 @@ local MasterPC = false
 local MasterGrocery = false 
 local AutoAppoint = false 
 local AutoChef = false 
-local AutoExtinguish = false 
 local AutoClean = false 
 local IsShopping = false 
 local IsBusy = false 
@@ -348,7 +347,7 @@ tabButtons["Home"].BackgroundColor3 = Color3.fromRGB(50, 50, 60)
 tabButtons["Home"].TextColor3 = Color3.fromRGB(255, 255, 255)
 
 -- ==========================================
--- STRICT & SECURE SNIPE FUNCTION (OPTIMIZED)
+-- STRICT & SECURE SNIPE FUNCTION
 -- ==========================================
 local function secureBuy(shopId, itemsToBuy)
     task.spawn(function()
@@ -478,20 +477,10 @@ toggleChef.TextSize = 13
 toggleChef.Parent = homeTab
 Instance.new("UICorner", toggleChef).CornerRadius = UDim.new(0, 6)
 
-local toggleExtinguish = Instance.new("TextButton")
-toggleExtinguish.Size = UDim2.new(0.85, 0, 0, 35)
-toggleExtinguish.Position = UDim2.new(0.075, 0, 0.65, 0)
-toggleExtinguish.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-toggleExtinguish.TextColor3 = Color3.fromRGB(255, 255, 255)
-toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: OFF"
-toggleExtinguish.Font = Enum.Font.GothamBlack
-toggleExtinguish.TextSize = 13
-toggleExtinguish.Parent = homeTab
-Instance.new("UICorner", toggleExtinguish).CornerRadius = UDim.new(0, 6)
-
+-- 🔥 NA-MOVE UP ANG CLEAN BUTTON KASI TINANGGAL ANG EXTINGUISH
 local toggleClean = Instance.new("TextButton")
 toggleClean.Size = UDim2.new(0.85, 0, 0, 35)
-toggleClean.Position = UDim2.new(0.075, 0, 0.80, 0)
+toggleClean.Position = UDim2.new(0.075, 0, 0.65, 0) 
 toggleClean.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
 toggleClean.TextColor3 = Color3.fromRGB(255, 255, 255)
 toggleClean.Text = "🧹 AUTO CLEAN (NIGHT): OFF"
@@ -553,17 +542,6 @@ toggleChef.MouseButton1Click:Connect(function()
     else
         toggleChef.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
         toggleChef.Text = "🍳 AUTO CHEF: OFF"
-    end
-end)
-
-toggleExtinguish.MouseButton1Click:Connect(function()
-    AutoExtinguish = not AutoExtinguish
-    if AutoExtinguish then
-        toggleExtinguish.BackgroundColor3 = Color3.fromRGB(40, 160, 70)
-        toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: ACTIVE"
-    else
-        toggleExtinguish.BackgroundColor3 = Color3.fromRGB(150, 40, 40)
-        toggleExtinguish.Text = "🧯 AUTO EXTINGUISH: OFF"
     end
 end)
 
@@ -949,90 +927,7 @@ local function isInsideMyBase(targetPos)
 end
 
 -- ============================================================================
--- 🔥 AUTO EXTINGUISH LOOP (OPTIMIZED)
--- ============================================================================
-task.spawn(function()
-    while true do
-        task.wait(1.5)
-        if AutoExtinguish and not IsShopping and not IsBusy then
-            pcall(function()
-                local char = Players.LocalPlayer.Character
-                local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                local humanoid = char and char:FindFirstChildWhichIsA("Humanoid")
-                if not hrp or not humanoid or humanoid.Health <= 0 then return end
-
-                local fireFound, firePart = nil, nil
-                for _, obj in ipairs(workspace:GetDescendants()) do
-                    local name = obj.Name:lower()
-                    if obj:IsA("ProximityPrompt") and (name:match("extinguish") or obj.ActionText:lower():match("extinguish") or obj.ObjectText:lower():match("fire")) then
-                        if obj.Parent and isInsideMyBase(obj.Parent.Position) then
-                            fireFound, firePart = obj, obj.Parent break
-                        end
-                    elseif (obj:IsA("ParticleEmitter") or obj:IsA("Fire")) and (name:match("fire") or name:match("flame")) then
-                        local part = obj.Parent
-                        if part and part:IsA("BasePart") and isInsideMyBase(part.Position) then
-                            fireFound, firePart = obj, part break
-                        end
-                    end
-                end
-
-                if not fireFound or not firePart then return end
-                
-                IsBusy = true 
-                humanoid:UnequipTools() 
-                task.wait(0.3)
-                
-                hrp.CFrame = CFrame.new(firePart.Position) * CFrame.new(0, 3, -4)
-                task.wait(0.4)
-                if humanoid then humanoid.Sit = false end
-                hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(firePart.Position.X, hrp.Position.Y, firePart.Position.Z))
-                task.wait(0.4)
-
-                local extTool = nil
-                local backpack = Players.LocalPlayer:FindFirstChild("Backpack")
-                if backpack then
-                    for _, t in ipairs(backpack:GetChildren()) do
-                        if t:IsA("Tool") and (t.Name:lower():match("extinguish") or t.Name:lower():match("fire")) then
-                            extTool = t break
-                        end
-                    end
-                end
-                
-                if extTool then
-                    humanoid:EquipTool(extTool)
-                    local isEquipped = false
-                    for w = 1, 15 do
-                        if extTool.Parent == char then isEquipped = true break end
-                        task.wait(0.1)
-                    end
-                    
-                    if isEquipped then
-                        task.wait(0.2)
-                        for i = 1, 10 do
-                            if extTool.Parent == char then
-                                extTool:Activate() VirtualUser:ClickButton1(Vector2.new())
-                                if fireFound:IsA("ProximityPrompt") then
-                                    local oldLOS = fireFound.RequiresLineOfSight
-                                    fireFound.RequiresLineOfSight = false
-                                    fireFound.MaxActivationDistance = 50
-                                    if fireproximityprompt then fireproximityprompt(fireFound) end
-                                    fireFound.RequiresLineOfSight = oldLOS
-                                end
-                            end
-                            task.wait(0.5)
-                        end
-                        task.wait(1.5)
-                    end
-                end
-                humanoid:UnequipTools() 
-                IsBusy = false
-            end)
-        end
-    end
-end)
-
--- ============================================================================
--- 🧹 AUTO CLEAN LOOP (OPTIMIZED STRICT WALIS/TOWEL)
+-- 🧹 AUTO CLEAN LOOP (OPTIMIZED STRICT WALIS/TOWEL WITH FIRE EXTINGUISHER BAN)
 -- ============================================================================
 task.spawn(function()
     while true do
@@ -1064,7 +959,9 @@ task.spawn(function()
 
                 if not messFound or not messPos then return end
                 
+                if IsBusy then return end
                 IsBusy = true 
+                
                 humanoid:UnequipTools() 
                 task.wait(0.3)
                 
@@ -1074,7 +971,6 @@ task.spawn(function()
                 hrp.CFrame = CFrame.lookAt(hrp.Position, Vector3.new(messPos.X, hrp.Position.Y, messPos.Z))
                 task.wait(0.4)
                 
-                -- 🔥 STRICT WALIS AT TOWEL MATCHER
                 local allowedTools = (messType == "glass") and {"towel", "sponge", "wipe", "rag"} or {"walis", "broom", "mop", "sweep"}
                 local toolToEquip = nil
                 local backpack = Players.LocalPlayer:FindFirstChild("Backpack")
@@ -1083,6 +979,12 @@ task.spawn(function()
                     for _, t in ipairs(backpack:GetChildren()) do
                         if t:IsA("Tool") then
                             local tName = t.Name:lower()
+                            
+                            -- Hinding-hindi pwede kumuha ng Fire Extinguisher
+                            if tName:match("fire") or tName:match("extinguish") then
+                                continue 
+                            end
+                            
                             for _, allowed in ipairs(allowedTools) do
                                 if tName:match(allowed) then toolToEquip = t break end
                             end
