@@ -1,7 +1,9 @@
--- SH Helper v8 fixed: crate opening + owner scan + real values + whitelist + unload tab
--- + OfferOverweightAdd detection: stops pickup, dismisses popup, triggers unload
+-- SH Helper v8.1 DEBUG
+-- + debug logging in farmStep, all events, collect, unload
+-- + pcall safety guards (stuck-flag auto-recovery)
+-- + inAuction / collecting stuck-detection (30s / 90s)
+-- + SH_Dump() global for manual console inspection
 if _G.SH_HelperCleanup then pcall(_G.SH_HelperCleanup) end
-
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -12,7 +14,6 @@ local Events = ReplicatedStorage:WaitForChild("Events")
 local Auction = Events:WaitForChild("Auction")
 local Vehicles = Events:WaitForChild("Vehicles")
 local Plot = Events:WaitForChild("Plot")
-
 local bidRemote = Auction:WaitForChild("Bid")
 local leaveRemote = Auction:WaitForChild("LeaveAuction")
 local updateBid = Auction:WaitForChild("UpdateCurrentWinningBid")
@@ -30,11 +31,10 @@ local placeStock = Plot:WaitForChild("PlaceStockItem")
 local placeStockResult = Plot:WaitForChild("PlaceStockItemResult")
 local getVehicleItems = Vehicles:WaitForChild("GetVehicleItems")
 local unloadVehicle = Vehicles:WaitForChild("TransferVehicleItemsToInventory")
-local offerOverweightAdd = Events.UI:WaitForChild("OfferOverweightAdd") -- NEW
+local offerOverweightAdd = Events.UI:WaitForChild("OfferOverweightAdd")
 local getLostItems    = Events.UI:WaitForChild("GetLostItems")
 local claimLostItem   = Events.UI:WaitForChild("ClaimLostItem")
 local notifyRemote    = Events.UI:WaitForChild("Notify")
-
 -- Base position
 local ownBase = Vector3.new(-431.1, 1722.2, 430.0)
 pcall(function()
@@ -48,24 +48,22 @@ pcall(function()
 		end
 	end
 end)
-
 local Items = {}
 pcall(function() local r = require(ReplicatedStorage.Modules.Items); if type(r) == "table" then Items = r end end)
-
 local MutatorModule, Grading
 pcall(function() MutatorModule = require(ReplicatedStorage.Modules.MutatorModule) end)
 pcall(function() Grading = require(ReplicatedStorage.Modules.GameConfig).Grading end)
-
 local connections = {}
 local alive = true
 local refreshUi
-
 local state = {
 	master = true, farm = false, autoWin = true, autoBidSpeed = 0.5,
 	selected = {}, garages = {}, index = 0,
 	target = nil, targetStarted = 0, targetTimeout = 20, lastScan = 0,
 	currentAuctionGarage = nil, inAuction = false,
+	inAuctionSince = 0,   -- DEBUG: timestamp when inAuction last became true
 	won = false, wonGarage = nil, collecting = false,
+	collectingSince = 0,  -- DEBUG: timestamp when collecting started
 	beforeInventory = {}, lastBid = 0, currentBid = 0, startingBid = 0,
 	status = "Ready", teleportMethod = "Instant",
 	autoLeaveMinBid = false, autoLeaveMinBidAmt = 5000,
@@ -74,25 +72,18 @@ local state = {
 	-- unload tab
 	autoUnload = false, autoShelf = false, unloadPct = 90, unloading = false, shelving = false,
 	-- overweight signal
-	overweightSignal = false, -- set true when OfferOverweightAdd fires during pickup
-	vehicleFarSignal = false,   -- set true when "vehicle too far away" Notify fires during pickup
-	shelfSlotAvailable = false, -- set true when a "Sold" notification confirms a slot opened
+	overweightSignal = false,
+	vehicleFarSignal = false,
+	shelfSlotAvailable = false,
 	-- lost & found
 	autoLostFound = false, lostFoundRunning = false,
-	-- inventory cap (auto-detected; override if needed)
+	-- inventory cap
 	invCap = 10,
 }
-
 local config = {
 	minBid = 0, minItemValue = 100, hitTolerance = 0.0075,
 	whitelist = {
-		-- Trophies & Certificates (original)
-		["376"]=true, -- Gavel Trophy
-		["562"]=true, -- Race Trophy
-		["635"]=true, -- Wooden Certificate Of Authenticity
-		["735"]=true, -- Premium Certificate Of Authenticity
-		["764"]=true, -- Ripped Certificate Of Authenticity
-		-- Accessories (90 items — always farm, bypass min value)
+		["376"]=true, ["562"]=true, ["635"]=true, ["735"]=true, ["764"]=true,
 		["1"]=true,["5"]=true,["17"]=true,["44"]=true,["50"]=true,
 		["67"]=true,["81"]=true,["101"]=true,["348"]=true,["362"]=true,
 		["363"]=true,["365"]=true,["366"]=true,["367"]=true,["368"]=true,
@@ -111,28 +102,20 @@ local config = {
 		["790"]=true,["791"]=true,["800"]=true,["808"]=true,["812"]=true,
 		["813"]=true,["815"]=true,["821"]=true,["829"]=true,["830"]=true,
 		["831"]=true,["832"]=true,["841"]=true,["842"]=true,["843"]=true,
-		-- Vehicle Parts: Spoilers (15)
 		["502"]=true,["503"]=true,["509"]=true,["510"]=true,["518"]=true,
 		["519"]=true,["521"]=true,["522"]=true,["524"]=true,["736"]=true,
 		["737"]=true,["738"]=true,["739"]=true,["751"]=true,["826"]=true,
-		-- Vehicle Parts: Exhausts (17)
 		["504"]=true,["505"]=true,["506"]=true,["507"]=true,["511"]=true,
 		["512"]=true,["520"]=true,["523"]=true,["525"]=true,["526"]=true,
 		["740"]=true,["741"]=true,["742"]=true,["744"]=true,["752"]=true,
 		["822"]=true,["825"]=true,
-		-- Vehicle Parts: Wheels (11)
 		["577"]=true,["578"]=true,["579"]=true,["580"]=true,["581"]=true,
 		["582"]=true,["583"]=true,["743"]=true,["753"]=true,["823"]=true,
 		["824"]=true,
 	},
 	shelfBlacklist = {
-		-- Drinks & Diamonds (original)
-		["357"]=true,["358"]=true,
-		["359"]=true,["360"]=true,["361"]=true,
-		-- Trophies & Certificates
-		["376"]=true,["562"]=true,
-		["635"]=true,["735"]=true,["764"]=true,
-		-- Accessories (90 items — wearables don't belong on shop shelf)
+		["357"]=true,["358"]=true,["359"]=true,["360"]=true,["361"]=true,
+		["376"]=true,["562"]=true,["635"]=true,["735"]=true,["764"]=true,
 		["1"]=true,["5"]=true,["17"]=true,["44"]=true,["50"]=true,
 		["67"]=true,["81"]=true,["101"]=true,["348"]=true,["362"]=true,
 		["363"]=true,["365"]=true,["366"]=true,["367"]=true,["368"]=true,
@@ -151,26 +134,20 @@ local config = {
 		["790"]=true,["791"]=true,["800"]=true,["808"]=true,["812"]=true,
 		["813"]=true,["815"]=true,["821"]=true,["829"]=true,["830"]=true,
 		["831"]=true,["832"]=true,["841"]=true,["842"]=true,["843"]=true,
-		-- Vehicle Parts: Spoilers (15)
 		["502"]=true,["503"]=true,["509"]=true,["510"]=true,["518"]=true,
 		["519"]=true,["521"]=true,["522"]=true,["524"]=true,["736"]=true,
 		["737"]=true,["738"]=true,["739"]=true,["751"]=true,["826"]=true,
-		-- Vehicle Parts: Exhausts (17)
 		["504"]=true,["505"]=true,["506"]=true,["507"]=true,["511"]=true,
 		["512"]=true,["520"]=true,["523"]=true,["525"]=true,["526"]=true,
 		["740"]=true,["741"]=true,["742"]=true,["744"]=true,["752"]=true,
 		["822"]=true,["825"]=true,
-		-- Vehicle Parts: Wheels (11)
 		["577"]=true,["578"]=true,["579"]=true,["580"]=true,["581"]=true,
 		["582"]=true,["583"]=true,["743"]=true,["753"]=true,["823"]=true,
 		["824"]=true,
 	}
 }
-
 local areaOptions = { "JunkYard", "BackAlley", "Farmyard", "Shipyard", "LuckyBeach", "PowerPlant" }
-state.selected["JunkYard"] = true -- default: only one area selected at a time (radio)
-
--- Maps script area key → game display name used by GetLostItems / ClaimLostItem / workspace.Areas
+state.selected["JunkYard"] = true
 local areaGameNames = {
 	JunkYard    = "Junk Yard",
 	BackAlley   = "Back Alley",
@@ -180,18 +157,37 @@ local areaGameNames = {
 	PowerPlant  = "Power Plant",
 }
 
+-- ══════════════════════════════════════════════════════════════
+-- DEBUG HELPERS
+-- ══════════════════════════════════════════════════════════════
+local dbg  = function(msg) print("[SH] "  .. tostring(msg)) end
+local wdbg = function(msg) warn("[SH] "  .. tostring(msg)) end
+
+-- farmStep block-reason logger: throttled to avoid spam (same reason = max 1 print per 5s)
+local _farmMsg = ""; local _farmTime = 0
+local function farmDbg(reason)
+	local now = os.clock()
+	if reason ~= _farmMsg or now - _farmTime >= 5 then
+		_farmMsg = reason; _farmTime = now
+		dbg("farmStep blocked → " .. reason)
+	end
+end
+
+-- ══════════════════════════════════════════════════════════════
+-- CORE HELPERS
+-- ══════════════════════════════════════════════════════════════
 local function connect(s, cb) local c = s:Connect(cb); table.insert(connections, c); return c end
 local function cleanup()
 	alive = false
 	for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
 	local ui = playerGui:FindFirstChild("SH_ControlUI"); if ui then ui:Destroy() end
-	getgenv().SH_SetFarm = nil; getgenv().SH_State = nil; _G.SH_HelperCleanup = nil
+	getgenv().SH_SetFarm = nil; getgenv().SH_State = nil; getgenv().SH_Dump = nil
+	_G.SH_HelperCleanup = nil
 end
 _G.SH_HelperCleanup = cleanup
 local function setStatus(t) state.status = t; if refreshUi then refreshUi() end end
 local function rootPart() local c = player.Character; return c and c:FindFirstChild("HumanoidRootPart") end
 local function normalizeArea(v) return tostring(v or ""):gsub("%s+", ""):gsub(" ", "") end
-
 local function triggerPrompt(prompt)
 	if not prompt or not prompt:IsA("ProximityPrompt") then return end
 	local oldHold = prompt.HoldDuration
@@ -208,7 +204,6 @@ local function triggerPrompt(prompt)
 	end
 	pcall(function() prompt.HoldDuration = oldHold end)
 end
-
 local function teleportPlayer(targetCF)
 	local char = player.Character; local hrp = char and char:FindFirstChild("HumanoidRootPart")
 	if not hrp then return end
@@ -230,25 +225,24 @@ local function teleportPlayer(targetCF)
 		hrp.CFrame = targetCF; hrp.AssemblyLinearVelocity = Vector3.zero
 	end
 end
-
 local exitVehicle = function()
 	local c = player.Character; local h = c and c:FindFirstChildOfClass("Humanoid")
 	local s = h and h.SeatPart
 	if s then pcall(function() s:Sit(nil) end); h.Sit = false; task.wait(0.15) end
 end
-
 local function vehicleNear(pos)
 	for _, i in ipairs(workspace:GetDescendants()) do
 		if i:IsA("VehicleSeat") and (i.Position - pos).Magnitude <= 80 then return true end
 	end; return false
 end
-
 local function scanGarages()
 	local ok, bd = pcall(function() return getNetWorth:InvokeServer() end)
 	local nw = ok and type(bd) == "table" and tonumber(bd.Total) or 0
 	local r = {}
 	local gf = workspace._Debris:FindFirstChild("Garages")
-	if not gf then state.garages = r; state.lastScan = os.clock(); return 0 end
+	if not gf then state.garages = r; state.lastScan = os.clock()
+		dbg("scanGarages: Garages folder not found"); return 0
+	end
 	for _, g in ipairs(gf:GetChildren()) do
 		local z = g:FindFirstChild("AuctionZone", true)
 		if z and z:IsA("BasePart") then
@@ -261,12 +255,12 @@ local function scanGarages()
 			end
 		end
 	end
-	state.garages = r; state.lastScan = os.clock(); return #r
+	state.garages = r; state.lastScan = os.clock()
+	dbg(string.format("scanGarages: %d eligible garages (netWorth=$%d)", #r, nw))
+	return #r
 end
-
 local function selectedGarage(idx)
 	local n = #state.garages; if n == 0 then return nil, nil end
-	-- first pass: prefer garages whose EnterAuction prompt is currently enabled (active auction)
 	for step = 1, n do
 		local ni = ((idx + step - 1) % n) + 1; local g = state.garages[ni]
 		if state.selected[g.area] then
@@ -274,15 +268,12 @@ local function selectedGarage(idx)
 			if p and p:IsA("ProximityPrompt") and p.Enabled then return ni, g end
 		end
 	end
-	-- fallback: any selected garage (no active auction visible yet — wait at one until it starts)
 	for step = 1, n do
 		local ni = ((idx + step - 1) % n) + 1; local g = state.garages[ni]
 		if state.selected[g.area] then return ni, g end
 	end
 	return nil, nil
 end
-
--- ORIGINAL findBidBar from v8 (no changes)
 local function findBidBar()
 	for _, i in ipairs(playerGui:GetDescendants()) do
 		if i.Name == "AuctionBiddingContainer" and i:IsA("Frame") and i.Visible then
@@ -295,21 +286,21 @@ local function findBidBar()
 	end
 	return nil
 end
-
-local lastLeaveTime = 0 -- cooldown timer: set on leaveAuction, checked in farmStep
-
--- ORIGINAL leaveAuction from v8
+local lastLeaveTime = 0
 local function leaveAuction()
+	dbg("leaveAuction called")
 	pcall(function() leaveRemote:InvokeServer() end)
 	state.inAuction = false; state.won = false; state.lastBid = 0
-	state.target = nil; state.lastScan = 0 -- force immediate rescan + next garage on next farmStep tick
-	lastLeaveTime = os.clock() -- cooldown: prevent instant TP to next garage after leaving
+	state.target = nil; state.lastScan = 0
+	lastLeaveTime = os.clock()
 end
-
--- ORIGINAL tryBid from v8
 local function tryBid()
 	local cur, zone, w = findBidBar(); if not cur then return false end
-	state.inAuction = true
+	if not state.inAuction then
+		state.inAuction = true
+		state.inAuctionSince = os.clock()
+		dbg("tryBid: bid bar found → inAuction=true")
+	end
 	local checkBid = state.currentBid > 0 and state.currentBid or state.startingBid
 	if state.autoLeaveMinBid and checkBid > 0 and checkBid < state.autoLeaveMinBidAmt then leaveAuction(); setStatus("Left: bid $"..checkBid.." < $"..state.autoLeaveMinBidAmt); return true end
 	if state.autoLeaveValueMin and state.startingBid > 0 and state.startingBid < state.autoLeaveValueAmt then leaveAuction(); setStatus("Left: value $"..state.startingBid.." < $"..state.autoLeaveValueAmt); return true end
@@ -322,8 +313,6 @@ local function tryBid()
 	end
 	return true
 end
-
--- ORIGINAL startPromptLoop from v8
 local function startPromptLoop(g)
 	task.spawn(function()
 		for _ = 1, 15 do
@@ -331,43 +320,63 @@ local function startPromptLoop(g)
 			local p = g.instance:FindFirstChild("EnterAuction", true)
 			if p and p:IsA("ProximityPrompt") and p.Enabled then
 				triggerPrompt(p)
-				task.wait(1.5) -- wait for bid bar to appear before retrying (reduces "already in auction" spam)
+				task.wait(1.5)
 			else
 				task.wait(0.3)
 			end
 		end
-		-- all 15 attempts exhausted without getting a bid bar → another player won first
-		-- clear target so farmStep immediately picks the next garage on the next tick
 		if alive and state.farm and not state.won and not findBidBar() then
+			dbg("startPromptLoop: all 15 attempts exhausted → clearing target")
 			setStatus("Missed auction — moving to next garage")
 			state.target = nil
 		end
 	end)
 end
-
--- ORIGINAL chooseNextGarage from v8
 local function chooseNextGarage()
 	local idx, g = selectedGarage(state.index)
-	if not g then setStatus("No garages -- rescanning"); scanGarages(); return end
+	if not g then
+		dbg("chooseNextGarage: no eligible garage found → rescanning")
+		setStatus("No garages -- rescanning"); scanGarages(); return
+	end
 	state.index = idx; state.target = g; state.targetStarted = os.clock()
+	dbg("chooseNextGarage: → " .. g.area .. " / " .. g.name)
 	teleportPlayer(g.zone.CFrame * CFrame.new(0, 2, -4))
 	setStatus("Going: "..g.area.." / "..g.name)
 	startPromptLoop(g)
 end
 
--- ORIGINAL farmStep from v8 (with collecting guard added)
+-- ── FARM STEP ────────────────────────────────────────────────
 local function farmStep()
-	if not alive or not state.master or not state.farm then return end
+	if not alive or not state.master or not state.farm then
+		farmDbg(string.format("master=%s farm=%s alive=%s", tostring(state.master), tostring(state.farm), tostring(alive)))
+		return
+	end
 	if #state.garages == 0 or os.clock() - state.lastScan >= 10 then scanGarages() end
 	if tryBid() then return end
-	if state.won or state.collecting then return end
-	if state.inAuction then return end -- don't switch garages while server says we're in an auction
-	if os.clock() - lastLeaveTime < 2.5 then return end -- cooldown after leaving auction (prevents instant re-TP)
-	if state.target and os.clock() - state.targetStarted < state.targetTimeout then return end
+	if state.won then
+		farmDbg("won=true (waiting for collectWonItems)")
+		return
+	end
+	if state.collecting then
+		farmDbg(string.format("collecting=true (%.0fs elapsed)", os.clock() - state.collectingSince))
+		return
+	end
+	if state.inAuction then
+		farmDbg(string.format("inAuction=true (%.0fs elapsed)", os.clock() - state.inAuctionSince))
+		return
+	end
+	if os.clock() - lastLeaveTime < 2.5 then
+		farmDbg(string.format("leaveAuction cooldown (%.1fs remaining)", 2.5 - (os.clock() - lastLeaveTime)))
+		return
+	end
+	if state.target and os.clock() - state.targetStarted < state.targetTimeout then
+		farmDbg(string.format("waiting at target '%s' (%.0fs / %.0fs)", state.target.name, os.clock()-state.targetStarted, state.targetTimeout))
+		return
+	end
 	state.target = nil; chooseNextGarage()
 end
 
--- Real item value
+-- ── ITEM VALUE ───────────────────────────────────────────────
 local function getRealValue(entry)
 	if not entry then return 0 end
 	local d = Items[tostring(entry.ItemId or "")] or Items[tonumber(entry.ItemId or 0)]
@@ -380,7 +389,6 @@ local function getRealValue(entry)
 	end)
 	return p
 end
-
 local function moveAllWonToVehicle()
 	local ok, inv = pcall(function() return getInventory:InvokeServer() end)
 	if not ok or type(inv) ~= "table" then return 0, 0 end
@@ -396,6 +404,7 @@ local function moveAllWonToVehicle()
 	return moved, repaired
 end
 
+-- ── COLLECT WON ITEMS ─────────────────────────────────────────
 local collectWonItems
 local isOverweight
 local doUnloadAndStock
@@ -407,7 +416,6 @@ local function finalizeWin()
 		local inv = getInventory:InvokeServer()
 		if type(inv) == "table" then for guid in pairs(inv) do state.beforeInventory[guid] = true end end
 	end)
-	-- always spawn vehicle before collecting won items
 	local equippedGUID = tostring(player:GetAttribute("EquippedVehicle") or "")
 	if equippedGUID ~= "" then
 		pcall(function() requestSpawn:FireServer(equippedGUID) end)
@@ -415,163 +423,166 @@ local function finalizeWin()
 	end
 	collectWonItems()
 end
-
 collectWonItems = function()
 	if state.collecting then return end
 	state.collecting = true
+	state.collectingSince = os.clock()
+	dbg("collectWonItems: started")
 	task.spawn(function()
-		local garage = state.wonGarage
-		if not garage then
-			state.won = false; state.wonGarage = nil; state.collecting = false; return
-		end
-
-		state.overweightSignal = false  -- reset at start of each pickup session
-		state.vehicleFarSignal = false
-		state.beforeInventory = {}
-		pcall(function()
-			local inv = getInventory:InvokeServer()
-			if type(inv) == "table" then for g in pairs(inv) do state.beforeInventory[g] = true end end
-		end)
-
-		local deadline = os.clock() + 35
-		local collected, opened = 0, 0
-
-		-- PASS 1: open crates first
-		setStatus("Opening crates...")
-		local crateDeadline = os.clock() + 12
-		while alive and os.clock() < crateDeadline and state.won do
-			local crates = {}
-			for _, model in ipairs(workspace:GetDescendants()) do
-				if model:IsA("Model") and model:GetAttribute("Owner") == player.UserId then
-					local cp = model:FindFirstChild("OpenBoxPrompt", true)
-					if cp and cp:IsA("ProximityPrompt") and cp.Enabled then
-						local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
-						table.insert(crates, { prompt = cp, part = part })
-					end
-				end
+		-- pcall wraps the ENTIRE body so any crash still runs cleanup
+		local ok, err = pcall(function()
+			local garage = state.wonGarage
+			if not garage then
+				wdbg("collectWonItems: no wonGarage — aborting")
+				state.won = false; state.wonGarage = nil; state.collecting = false; return
 			end
-			if #crates == 0 then break end
-			for _, cr in ipairs(crates) do
-				if not alive or not state.won then break end
-				local root = rootPart()
-				if root and cr.part then
-					exitVehicle(); root.CFrame = cr.part.CFrame + Vector3.new(0,2,0); task.wait(0.15)
-				end
-				triggerPrompt(cr.prompt); opened = opened + 1; task.wait(0.6)
-			end
-			task.wait(0.5)
-		end
-		setStatus(string.format("Opened %d crates, scanning items...", opened))
-
-		-- PASS 2: pick up items
-		while alive and state.farm and os.clock() < deadline and state.won do
-			local candidates = {}
-			for _, model in ipairs(workspace:GetDescendants()) do
-				if model:IsA("Model") and model:GetAttribute("Owner") == player.UserId then
-					local pp = model:FindFirstChild("PickupPrompt", true)
-					if pp and pp:IsA("ProximityPrompt") and pp.Enabled then
-						local entry = nil
-						pcall(function()
-							if MutatorModule and MutatorModule.BuildEntryFromAttributes then
-								entry = MutatorModule:BuildEntryFromAttributes(model)
-							end
-						end)
-						if not entry then entry = { ItemId = model:GetAttribute("ItemId"), Mutators = {}, Condition = 100 } end
-						local idStr = tostring(entry.ItemId or "")
-						local d2 = Items[idStr] or Items[tonumber(idStr)]
-						local value = getRealValue(entry)
-						local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
-						table.insert(candidates, { prompt = pp, part = part, entry = entry, value = value, idStr = idStr, itemName = d2 and d2.Name or "" })
-					end
-				end
-			end
-
-			if #candidates == 0 then break end
-
-			table.sort(candidates, function(a, b) return a.value > b.value end)
-
-			local acted = false
-			for _, c in ipairs(candidates) do
-				if not alive or not state.won then break end
-				if state.overweightSignal then break end -- NEW: stop if overweight fired
-				local whitelisted = config.whitelist[c.idStr] or config.whitelist[c.itemName]
-				if config.minItemValue > 0 and c.value < config.minItemValue and not whitelisted then
-					-- skip
-				else
-					local root = rootPart()
-					if root and c.part then
-						exitVehicle(); root.CFrame = c.part.CFrame + Vector3.new(0,2,0); task.wait(0.1)
-					end
-					triggerPrompt(c.prompt); acted = true; task.wait(0.4)
-					if state.vehicleFarSignal then
-						-- pickup failed: vehicle too far — respawn and let outer while retry items
-						state.vehicleFarSignal = false
-						setStatus("Vehicle too far! Respawning...")
-						local eGUID = tostring(player:GetAttribute("EquippedVehicle") or "")
-						if eGUID ~= "" then
-							pcall(function() requestSpawn:FireServer(eGUID) end)
-							task.wait(2); exitVehicle(); task.wait(0.2)
-						end
-						break -- outer while will rescan and retry remaining items
-					end
-					collected = collected + 1
-					if state.overweightSignal then break end -- check after each pickup
-				end
-			end
-			if state.overweightSignal then break end -- NEW: propagate break to outer while
-			if not acted then break end
-		end
-
-		-- NEW: overweight bail-out — skip double-check, move what we have, go unload
-		if state.overweightSignal then
-			local moved, repaired = moveAllWonToVehicle()
-			setStatus(string.format("Overweight! Picked %d | moved %d — unloading...", collected, moved))
-			state.won = false; state.wonGarage = nil; state.collecting = false
 			state.overweightSignal = false
-			if not state.unloading then task.spawn(doUnloadAndStock) end
-			return
-		end
-
-		-- double check
-		task.wait(0.5)
-		local remaining = 0
-		for _, model in ipairs(workspace:GetDescendants()) do
-			if model:IsA("Model") and model:GetAttribute("Owner") == player.UserId then
-				local pp = model:FindFirstChild("PickupPrompt", true)
-				if pp and pp:IsA("ProximityPrompt") and pp.Enabled then remaining = remaining + 1 end
+			state.vehicleFarSignal = false
+			state.beforeInventory = {}
+			pcall(function()
+				local inv = getInventory:InvokeServer()
+				if type(inv) == "table" then for g in pairs(inv) do state.beforeInventory[g] = true end end
+			end)
+			local deadline = os.clock() + 35
+			local collected, opened = 0, 0
+			-- PASS 1: open crates
+			setStatus("Opening crates...")
+			local crateDeadline = os.clock() + 12
+			while alive and os.clock() < crateDeadline and state.won do
+				local crates = {}
+				for _, model in ipairs(workspace:GetDescendants()) do
+					if model:IsA("Model") and model:GetAttribute("Owner") == player.UserId then
+						local cp = model:FindFirstChild("OpenBoxPrompt", true)
+						if cp and cp:IsA("ProximityPrompt") and cp.Enabled then
+							local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+							table.insert(crates, { prompt = cp, part = part })
+						end
+					end
+				end
+				if #crates == 0 then break end
+				for _, cr in ipairs(crates) do
+					if not alive or not state.won then break end
+					local root = rootPart()
+					if root and cr.part then
+						exitVehicle(); root.CFrame = cr.part.CFrame + Vector3.new(0,2,0); task.wait(0.15)
+					end
+					triggerPrompt(cr.prompt); opened = opened + 1; task.wait(0.6)
+				end
+				task.wait(0.5)
 			end
-		end
-		if remaining > 0 then
-			setStatus("Double check: "..remaining.." items remaining, picking up...")
+			dbg(string.format("collectWonItems: opened %d crates", opened))
+			-- PASS 2: pick up items
+			while alive and state.farm and os.clock() < deadline and state.won do
+				local candidates = {}
+				for _, model in ipairs(workspace:GetDescendants()) do
+					if model:IsA("Model") and model:GetAttribute("Owner") == player.UserId then
+						local pp = model:FindFirstChild("PickupPrompt", true)
+						if pp and pp:IsA("ProximityPrompt") and pp.Enabled then
+							local entry = nil
+							pcall(function()
+								if MutatorModule and MutatorModule.BuildEntryFromAttributes then
+									entry = MutatorModule:BuildEntryFromAttributes(model)
+								end
+							end)
+							if not entry then entry = { ItemId = model:GetAttribute("ItemId"), Mutators = {}, Condition = 100 } end
+							local idStr = tostring(entry.ItemId or "")
+							local d2 = Items[idStr] or Items[tonumber(idStr)]
+							local value = getRealValue(entry)
+							local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+							table.insert(candidates, { prompt = pp, part = part, entry = entry, value = value, idStr = idStr, itemName = d2 and d2.Name or "" })
+						end
+					end
+				end
+				if #candidates == 0 then break end
+				table.sort(candidates, function(a, b) return a.value > b.value end)
+				local acted = false
+				for _, c in ipairs(candidates) do
+					if not alive or not state.won then break end
+					if state.overweightSignal then break end
+					local whitelisted = config.whitelist[c.idStr] or config.whitelist[c.itemName]
+					if config.minItemValue > 0 and c.value < config.minItemValue and not whitelisted then
+						-- skip
+					else
+						local root = rootPart()
+						if root and c.part then
+							exitVehicle(); root.CFrame = c.part.CFrame + Vector3.new(0,2,0); task.wait(0.1)
+						end
+						triggerPrompt(c.prompt); acted = true; task.wait(0.4)
+						if state.vehicleFarSignal then
+							state.vehicleFarSignal = false
+							dbg("collectWonItems: vehicle too far — respawning")
+							setStatus("Vehicle too far! Respawning...")
+							local eGUID = tostring(player:GetAttribute("EquippedVehicle") or "")
+							if eGUID ~= "" then
+								pcall(function() requestSpawn:FireServer(eGUID) end)
+								task.wait(2); exitVehicle(); task.wait(0.2)
+							end
+							break
+						end
+						collected = collected + 1
+						if state.overweightSignal then break end
+					end
+				end
+				if state.overweightSignal then break end
+				if not acted then break end
+			end
+			-- overweight bail-out
+			if state.overweightSignal then
+				local moved, repaired = moveAllWonToVehicle()
+				dbg(string.format("collectWonItems: overweight bail → collected=%d moved=%d repaired=%d", collected, moved, repaired))
+				setStatus(string.format("Overweight! Picked %d | moved %d — unloading...", collected, moved))
+				state.won = false; state.wonGarage = nil; state.collecting = false
+				state.overweightSignal = false
+				if not state.unloading then task.spawn(doUnloadAndStock) end
+				return
+			end
+			-- double check
+			task.wait(0.5)
+			local remaining = 0
 			for _, model in ipairs(workspace:GetDescendants()) do
 				if model:IsA("Model") and model:GetAttribute("Owner") == player.UserId then
 					local pp = model:FindFirstChild("PickupPrompt", true)
-					if pp and pp:IsA("ProximityPrompt") and pp.Enabled then
-						local entry = { ItemId = model:GetAttribute("ItemId"), Mutators = {}, Condition = 100 }
-						local idStr = tostring(entry.ItemId or "")
-						local d2 = Items[idStr] or Items[tonumber(idStr)]
-						local whitelisted = config.whitelist[idStr] or (d2 and config.whitelist[d2.Name])
-						local value = getRealValue(entry)
-						if not (config.minItemValue > 0 and value < config.minItemValue and not whitelisted) then
-							local root = rootPart()
-							local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
-							if root and part then exitVehicle(); root.CFrame = part.CFrame + Vector3.new(0,2,0); task.wait(0.1) end
-							triggerPrompt(pp); collected = collected + 1; task.wait(0.4)
+					if pp and pp:IsA("ProximityPrompt") and pp.Enabled then remaining = remaining + 1 end
+				end
+			end
+			if remaining > 0 then
+				dbg("collectWonItems: double-check found " .. remaining .. " remaining items")
+				setStatus("Double check: "..remaining.." items remaining, picking up...")
+				for _, model in ipairs(workspace:GetDescendants()) do
+					if model:IsA("Model") and model:GetAttribute("Owner") == player.UserId then
+						local pp = model:FindFirstChild("PickupPrompt", true)
+						if pp and pp:IsA("ProximityPrompt") and pp.Enabled then
+							local entry = { ItemId = model:GetAttribute("ItemId"), Mutators = {}, Condition = 100 }
+							local idStr = tostring(entry.ItemId or "")
+							local d2 = Items[idStr] or Items[tonumber(idStr)]
+							local whitelisted = config.whitelist[idStr] or (d2 and config.whitelist[d2.Name])
+							local value = getRealValue(entry)
+							if not (config.minItemValue > 0 and value < config.minItemValue and not whitelisted) then
+								local root = rootPart()
+								local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+								if root and part then exitVehicle(); root.CFrame = part.CFrame + Vector3.new(0,2,0); task.wait(0.1) end
+								triggerPrompt(pp); collected = collected + 1; task.wait(0.4)
+							end
 						end
 					end
 				end
 			end
-		end
-
-		local moved, repaired = moveAllWonToVehicle()
-		setStatus(string.format("Collected %d items, %d crates | moved %d (%d repaired)", collected, opened, moved, repaired))
-		state.won = false; state.wonGarage = nil; state.collecting = false
-		state.inAuction = false -- clear in case pickupEnd raced or didn't fire; farmStep must not block
-		state.target = nil      -- force chooseNextGarage on the next farmStep tick
-		state.lastScan = 0      -- force a fresh garage scan so the list is up to date
-
-		if state.autoUnload and isOverweight() and not state.unloading then
-			task.spawn(doUnloadAndStock)
+			local moved, repaired = moveAllWonToVehicle()
+			dbg(string.format("collectWonItems: done — collected=%d crates=%d moved=%d repaired=%d", collected, opened, moved, repaired))
+			setStatus(string.format("Collected %d items, %d crates | moved %d (%d repaired)", collected, opened, moved, repaired))
+			state.won = false; state.wonGarage = nil; state.collecting = false
+			state.inAuction = false
+			state.target = nil
+			state.lastScan = 0
+			if state.autoUnload and isOverweight() and not state.unloading then
+				task.spawn(doUnloadAndStock)
+			end
+		end)
+		-- SAFETY: if pcall caught an error, guarantee all flags are cleared
+		if not ok then
+			wdbg("collectWonItems CRASHED: " .. tostring(err))
+			state.won = false; state.wonGarage = nil; state.collecting = false
+			state.inAuction = false; state.target = nil; state.lastScan = 0
 		end
 	end)
 end
@@ -590,13 +601,11 @@ local function getVehicleWeight()
 	return tonumber(vm:GetAttribute("CargoWeight")) or 0, tonumber(vm:GetAttribute("CargoWeightLimit")) or 0
 end
 local function getMaxInventory()
-	-- try known player attributes first
 	local cap = tonumber(player:GetAttribute("InventoryCapacity"))
 		or tonumber(player:GetAttribute("MaxInventory"))
 		or tonumber(player:GetAttribute("InventorySize"))
 		or tonumber(player:GetAttribute("MaxInventorySlots"))
 	if cap and cap > 0 then return cap end
-	-- fallback: user-set override (state.invCap), default 10
 	return state.invCap or 10
 end
 isOverweight = function()
@@ -672,61 +681,76 @@ end
 
 -- ── UNLOAD SEQUENCE ──────────────────────────────────────────
 doUnloadAndStock = function()
-	if state.unloading then return end
+	if state.unloading then
+		dbg("doUnloadAndStock: already unloading — skipped")
+		return
+	end
 	state.unloading = true
 	local wasFarming = state.farm
 	state.farm = false
 	if refreshUi then refreshUi() end
-	setStatus("Going to base to unload...")
-	teleportPlayer(CFrame.new(ownBase + Vector3.new(0,3,0)))
-	task.wait(1.2)
-
-	-- spawn vehicle (stay seated for unload)
-	local equippedGUID = tostring(player:GetAttribute("EquippedVehicle") or "")
-	if equippedGUID ~= "" then
-		pcall(function() requestSpawn:FireServer(equippedGUID) end)
-		task.wait(2)
-	end
-
-	-- unload in batches
-	local totalUnloaded = 0
-	for _ = 1, 20 do
-		local ok, vitems = pcall(function() return getVehicleItems:InvokeServer(equippedGUID) end)
-		if not ok or type(vitems) ~= "table" or not next(vitems) then break end
-		local ok2, inv = pcall(function() return getInventory:InvokeServer() end)
-		local invCount = 0
-		if ok2 and type(inv) == "table" then for _ in pairs(inv) do invCount = invCount + 1 end end
-		local freeSlots = getMaxInventory() - invCount
-		if freeSlots <= 0 then
-			if state.autoShelf then
-				setStatus("Inventory full, stocking shelves first...")
-				stockShelves(); task.wait(0.5)
-			else break end
-		else
-			local guids = {}
-			for g in pairs(vitems) do table.insert(guids, g); if #guids >= freeSlots then break end end
-			pcall(function() unloadVehicle:FireServer(guids) end)
-			totalUnloaded = totalUnloaded + #guids
-			task.wait(1.5)
-			local remaining = 0
-			for _ in pairs(vitems) do remaining = remaining + 1 end
-			if #guids >= remaining then break end
+	dbg("doUnloadAndStock: started (wasFarming=" .. tostring(wasFarming) .. ")")
+	-- pcall wraps the entire body so a crash still restores flags
+	local ok, err = pcall(function()
+		setStatus("Going to base to unload...")
+		teleportPlayer(CFrame.new(ownBase + Vector3.new(0,3,0)))
+		task.wait(1.2)
+		local equippedGUID = tostring(player:GetAttribute("EquippedVehicle") or "")
+		if equippedGUID ~= "" then
+			pcall(function() requestSpawn:FireServer(equippedGUID) end)
+			task.wait(2)
 		end
+		local totalUnloaded = 0
+		for _ = 1, 20 do
+			local ok2, vitems = pcall(function() return getVehicleItems:InvokeServer(equippedGUID) end)
+			if not ok2 or type(vitems) ~= "table" or not next(vitems) then
+				dbg("doUnloadAndStock: vehicle empty or error — stopping unload loop")
+				break
+			end
+			local ok3, inv = pcall(function() return getInventory:InvokeServer() end)
+			local invCount = 0
+			if ok3 and type(inv) == "table" then for _ in pairs(inv) do invCount = invCount + 1 end end
+			local freeSlots = getMaxInventory() - invCount
+			if freeSlots <= 0 then
+				if state.autoShelf then
+					dbg("doUnloadAndStock: inv full — stocking shelves first")
+					setStatus("Inventory full, stocking shelves first...")
+					stockShelves(); task.wait(0.5)
+				else
+					dbg("doUnloadAndStock: inv full and autoShelf=false — stopping")
+					break
+				end
+			else
+				local guids = {}
+				for g in pairs(vitems) do table.insert(guids, g); if #guids >= freeSlots then break end end
+				pcall(function() unloadVehicle:FireServer(guids) end)
+				totalUnloaded = totalUnloaded + #guids
+				dbg(string.format("doUnloadAndStock: batch unloaded %d items (total=%d)", #guids, totalUnloaded))
+				task.wait(1.5)
+				local remaining = 0
+				for _ in pairs(vitems) do remaining = remaining + 1 end
+				if #guids >= remaining then break end
+			end
+		end
+		setStatus("Unloaded "..totalUnloaded.." items")
+		if state.autoShelf and alive then
+			setStatus("Stocking shelves...")
+			local stocked = stockShelves()
+			setStatus("Unloaded "..totalUnloaded.." | Stocked "..stocked)
+			dbg(string.format("doUnloadAndStock: stocked %d items", stocked))
+		end
+	end)
+	-- SAFETY: always restore flags regardless of success/error
+	if not ok then
+		wdbg("doUnloadAndStock CRASHED: " .. tostring(err))
 	end
-	setStatus("Unloaded "..totalUnloaded.." items")
-
-	if state.autoShelf and alive then
-		setStatus("Stocking shelves...")
-		local stocked = stockShelves()
-		setStatus("Unloaded "..totalUnloaded.." | Stocked "..stocked)
-	end
-
 	state.unloading = false
 	if wasFarming then
 		state.farm = true
 		scanGarages(); state.target = nil; state.index = 0
 		if refreshUi then refreshUi() end
 		setStatus("Farm resumed after unload")
+		dbg("doUnloadAndStock: farm restored")
 	end
 end
 
@@ -734,24 +758,18 @@ end
 local function doLostAndFound()
 	if state.lostFoundRunning then return end
 	state.lostFoundRunning = true
-
-	-- find the currently selected area key
 	local areaKey = nil
 	for _, key in ipairs(areaOptions) do
 		if state.selected[key] then areaKey = key; break end
 	end
 	if not areaKey then state.lostFoundRunning = false; return end
-
 	local gameName = areaGameNames[areaKey]
 	if not gameName then state.lostFoundRunning = false; return end
-
-	-- query server for lost items in this area
 	local ok, result = pcall(function() return getLostItems:InvokeServer(gameName) end)
 	if not ok or type(result) ~= "table" or type(result.items) ~= "table" then
+		dbg("doLostAndFound: no items or error for " .. gameName)
 		state.lostFoundRunning = false; return
 	end
-
-	-- filter by min value + whitelist (same rules as normal pickup — whitelist bypasses min value)
 	local qualifying = {}
 	for guid, entry in pairs(result.items) do
 		local idStr = tostring(entry.ItemId or "")
@@ -763,18 +781,14 @@ local function doLostAndFound()
 			table.insert(qualifying, { guid = guid, entry = entry, value = value })
 		end
 	end
-
 	if #qualifying == 0 then state.lostFoundRunning = false; return end
 	table.sort(qualifying, function(a, b) return a.value > b.value end)
-
-	-- wait for any active auction / pickup to finish (up to 60s)
+	dbg(string.format("doLostAndFound: %d qualifying items in %s", #qualifying, gameName))
 	local waited = 0
 	while (state.won or state.collecting or state.inAuction) and waited < 60 and alive do
 		task.wait(1); waited = waited + 1
 	end
 	if not alive then state.lostFoundRunning = false; return end
-
-	-- locate Lost and Found Box in workspace.Areas
 	local areasFolder = workspace:FindFirstChild("Areas")
 	local areaFolder  = areasFolder and areasFolder:FindFirstChild(gameName)
 	local lnfBox      = areaFolder and areaFolder:FindFirstChild("Lost and Found Box")
@@ -787,30 +801,22 @@ local function doLostAndFound()
 		setStatus("L&F: Lost and Found Box not found for "..gameName)
 		state.lostFoundRunning = false; return
 	end
-
 	local wasFarming = state.farm
 	state.farm = false
 	if refreshUi then refreshUi() end
-
 	setStatus("L&F: going to "..gameName.." Lost and Found Box...")
 	teleportPlayer(CFrame.new(lnfPart.Position + Vector3.new(0, 3, 0)))
 	task.wait(0.6)
-
-	-- spawn vehicle before pickup
 	local equippedGUID = tostring(player:GetAttribute("EquippedVehicle") or "")
 	if equippedGUID ~= "" then
 		pcall(function() requestSpawn:FireServer(equippedGUID) end)
 		task.wait(2); exitVehicle(); task.wait(0.2)
 	end
-
-	-- snapshot inventory so we know what's new after claims
 	local beforeLnfInv = {}
 	pcall(function()
 		local inv = getInventory:InvokeServer()
 		if type(inv) == "table" then for g in pairs(inv) do beforeLnfInv[g] = true end end
 	end)
-
-	-- claim qualifying items one by one
 	local claimed = 0
 	for _, item in ipairs(qualifying) do
 		if not alive then break end
@@ -824,8 +830,6 @@ local function doLostAndFound()
 		end
 		task.wait(0.5)
 	end
-
-	-- move newly claimed items to vehicle
 	if claimed > 0 then
 		task.wait(0.5)
 		local ok3, inv = pcall(function() return getInventory:InvokeServer() end)
@@ -840,10 +844,9 @@ local function doLostAndFound()
 			end
 		end
 	end
-
+	dbg(string.format("doLostAndFound: done — %d/%d claimed", claimed, #qualifying))
 	setStatus(string.format("L&F: done — %d/%d items claimed", claimed, #qualifying))
 	state.lostFoundRunning = false
-
 	if wasFarming then
 		state.farm = true
 		scanGarages(); state.target = nil; state.index = 0
@@ -852,27 +855,85 @@ local function doLostAndFound()
 	end
 end
 
--- ── AUTO WEIGHT + SHELF CHECK ─────────────────────────────────
+-- ── AUTO CHECKS (weight / shelf / lost+found / stuck detection) ───────────────
 local lastWeightCheck = 0
 local lastShelfCheck = 0
 local lastLostFoundCheck = 0
+local lastStateDump = 0
+
 local function autoChecks()
 	local now = os.clock()
-	-- weight check every 5s
+
+	-- ── PERIODIC STATE DUMP (every 10s when farm is running) ──
+	if state.farm and now - lastStateDump >= 10 then
+		lastStateDump = now
+		local cw, lim = getVehicleWeight()
+		warn(string.format(
+			"[SH-STATE] farm=%s won=%s collecting=%s(%.0fs) inAuction=%s(%.0fs) unloading=%s shelving=%s | garages=%d target=%s | vehicle=%.0f/%.0fkg",
+			tostring(state.farm), tostring(state.won),
+			tostring(state.collecting), now - state.collectingSince,
+			tostring(state.inAuction), now - state.inAuctionSince,
+			tostring(state.unloading), tostring(state.shelving),
+			#state.garages, state.target and state.target.name or "nil",
+			cw, lim
+		))
+	end
+
+	-- ── STUCK DETECTION: inAuction > 30s with no bid bar ─────
+	if state.inAuction and not state.won and not state.collecting then
+		local stuckSec = now - state.inAuctionSince
+		if stuckSec > 30 then
+			local hasBidBar = findBidBar() ~= nil
+			if not hasBidBar then
+				wdbg(string.format("STUCK: inAuction=true for %.0fs with no bid bar → auto-clearing", stuckSec))
+				state.inAuction = false
+				state.lastScan = 0; state.target = nil
+			end
+		end
+	end
+
+	-- ── STUCK DETECTION: collecting > 90s ────────────────────
+	if state.collecting then
+		local stuckSec = now - state.collectingSince
+		if stuckSec > 90 then
+			wdbg(string.format("STUCK: collecting=true for %.0fs → force-clearing", stuckSec))
+			state.won = false; state.wonGarage = nil; state.collecting = false
+			state.inAuction = false; state.target = nil; state.lastScan = 0
+		end
+	end
+
+	-- ── STUCK DETECTION: unloading > 120s ────────────────────
+	if state.unloading then
+		-- unloading has its own wasFarming restore at the end,
+		-- but if it crashed we need a backstop
+		-- (doUnloadAndStock now has pcall so this is a last resort)
+		local stuckSec = now - (state.unloadingSince or now)
+		if stuckSec > 120 then
+			wdbg(string.format("STUCK: unloading=true for %.0fs → force-clearing", stuckSec))
+			state.unloading = false
+		end
+	end
+
+	-- ── AUTO UNLOAD ───────────────────────────────────────────
 	if state.autoUnload and not state.unloading and not state.inAuction and not state.won and not state.collecting then
 		if now - lastWeightCheck >= 5 then
 			lastWeightCheck = now
-			if isOverweight() then task.spawn(doUnloadAndStock); return end
+			if isOverweight() then
+				dbg("autoChecks: vehicle overweight → triggering unload")
+				task.spawn(doUnloadAndStock); return
+			end
 		end
 	end
-	-- lost & found check every 45s
+
+	-- ── AUTO LOST & FOUND ─────────────────────────────────────
 	if state.autoLostFound and state.farm and not state.lostFoundRunning and not state.unloading then
 		if now - lastLostFoundCheck >= 45 then
 			lastLostFoundCheck = now
 			task.spawn(doLostAndFound)
 		end
 	end
-	-- shelf check every 5s (background, farm keeps running)
+
+	-- ── AUTO SHELF ────────────────────────────────────────────
 	if state.autoShelf and not state.unloading and not state.shelving then
 		if now - lastShelfCheck >= 5 then
 			lastShelfCheck = now
@@ -884,7 +945,6 @@ local function autoChecks()
 					if not config.shelfBlacklist[tostring(entry.ItemId or "")] then hasItems = true; break end
 				end
 				if not hasItems then return end
-				-- check free slots
 				local myPlot
 				local plots = workspace:FindFirstChild("_Plots")
 				if plots then
@@ -915,15 +975,10 @@ local function autoChecks()
 						end
 					end
 				end
-				-- When far from base, workspace._Plots isn't fully streamed: the Stock folder
-				-- has no children so every snap point looks free (false positive).
-				-- Only trust the local scan when the player is near base.
-				-- If a "Sold" notification arrived, a slot definitely opened — trust that instead.
 				local hrp2 = rootPart()
 				local nearBase = hrp2 and (hrp2.Position - ownBase).Magnitude < 250
 				if not ((nearBase and freeSlotFound) or state.shelfSlotAvailable) then return end
-				state.shelfSlotAvailable = false -- consume the flag
-				-- confirmed slot available — wait for auction/pickup to finish, then stock and return
+				state.shelfSlotAvailable = false
 				local waited = 0
 				while (state.inAuction or state.won or state.collecting) and waited < 60 do
 					task.wait(1); waited = waited + 1
@@ -967,13 +1022,8 @@ panel.Size = UDim2.fromOffset(460, 540); panel.Position = UDim2.fromOffset(8, 64
 panel.BackgroundColor3 = Color3.fromRGB(14,17,24); panel.BorderSizePixel = 0; panel.Active = true
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0,10)
 local pstroke = Instance.new("UIStroke", panel); pstroke.Color = Color3.fromRGB(52,148,118); pstroke.Thickness = 1
-
--- ── MOBILE ADDITIONS ─────────────────────────────────────────
--- UIScale so the whole panel can be shrunk for small screens
 local uiScaleObj = Instance.new("UIScale", panel)
 uiScaleObj.Scale = 1.0
-
--- Floating hide/show toggle (always visible even when panel is hidden)
 local floatBtn = Instance.new("TextButton", gui)
 floatBtn.Size = UDim2.fromOffset(60, 24)
 floatBtn.Position = UDim2.fromOffset(8, 36)
@@ -989,8 +1039,6 @@ connect(floatBtn.MouseButton1Click, function()
 	panel.Visible = not panel.Visible
 	floatBtn.Text = panel.Visible and "SH ▼" or "SH ▶"
 end)
--- ─────────────────────────────────────────────────────────────
-
 do
 	local drag, ds, dp = false, nil, nil
 	panel.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=true;ds=i.Position;dp=panel.Position end end)
@@ -1001,7 +1049,6 @@ do
 		end
 	end)
 end
-
 local function btn(text, parent, x, y, w)
 	w = w or 190
 	local b = Instance.new("TextButton", parent)
@@ -1024,7 +1071,6 @@ local function inp(text, parent, x, y, w)
 	i.Font=Enum.Font.Gotham; i.TextSize=12; i.BorderSizePixel=0
 	Instance.new("UICorner",i).CornerRadius=UDim.new(0,5); return i
 end
-
 local tabs = { "MAIN", "FARM", "TELEPORT", "UNLOAD" }
 local pages = {}
 local tabBar = Instance.new("Frame", panel)
@@ -1035,7 +1081,6 @@ for i, name in ipairs(tabs) do
 	pg.Size=UDim2.new(1,0,1,-34); pg.BackgroundTransparency=1; pg.Visible=i==1; pages[i]=pg
 	connect(t.MouseButton1Click, function() for n,o in ipairs(pages) do o.Visible=n==i end end)
 end
-
 -- PAGE 1: MAIN
 local masterBtn = btn("Master: ON", pages[1], 8, 8)
 local winBtn    = btn("Auto-Win: ON", pages[1], 236, 8, 214)
@@ -1045,8 +1090,6 @@ exitBtn.BackgroundColor3=Color3.fromRGB(80,30,30); exitBtn.TextColor3=Color3.fro
 connect(exitBtn.MouseButton1Click, function() cleanup() end)
 local statusLbl = lbl("Ready", pages[1], 8, 84)
 local weightLbl = lbl("Vehicle: -- / -- kg", pages[1], 8, 104)
-
--- UI Scale controls (step 0.05, range 0.40x – 1.50x)
 do
 	local scaleLbl = Instance.new("TextLabel", pages[1])
 	scaleLbl.Position = UDim2.fromOffset(8, 128)
@@ -1056,44 +1099,36 @@ do
 	scaleLbl.TextXAlignment = Enum.TextXAlignment.Left
 	scaleLbl.TextColor3 = Color3.fromRGB(140,200,180)
 	scaleLbl.Text = "UI Scale: 1.00x  (tap – / + to resize)"
-
-	local scaleDownBtn = btn("   –   ", pages[1], 8, 150, 80)
-	local scaleUpBtn   = btn("   +   ", pages[1], 96, 150, 80)
+	local scaleDownBtn  = btn("   –   ", pages[1], 8,   150, 80)
+	local scaleUpBtn    = btn("   +   ", pages[1], 96,  150, 80)
 	local scaleResetBtn = btn("Reset 1x", pages[1], 184, 150, 100)
-
 	local function applyScale(s)
-		s = math.floor(s * 100 + 0.5) / 100          -- round to 2dp
+		s = math.floor(s * 100 + 0.5) / 100
 		s = math.max(0.40, math.min(1.50, s))
 		uiScaleObj.Scale = s
 		scaleLbl.Text = string.format("UI Scale: %.2fx  (tap – / + to resize)", s)
 	end
-
 	connect(scaleDownBtn.MouseButton1Click,  function() applyScale(uiScaleObj.Scale - 0.05) end)
 	connect(scaleUpBtn.MouseButton1Click,    function() applyScale(uiScaleObj.Scale + 0.05) end)
 	connect(scaleResetBtn.MouseButton1Click, function() applyScale(1.0) end)
 end
-
 connect(tpBtn.MouseButton1Click, function()
 	state.teleportMethod = state.teleportMethod=="Instant" and "Tween" or "Instant"
 	tpBtn.Text = "TP: "..state.teleportMethod
 end)
-
 -- PAGE 2: FARM
 local farmBtn   = btn("Farm: OFF", pages[2], 8, 8, 200)
 local rescanBtn = btn("Rescan", pages[2], 216, 8, 110)
 local applyBtn  = btn("Apply", pages[2], 334, 8, 116)
-
 lbl("Min Bid ($)", pages[2], 8, 46)
 local bidBox = inp("0", pages[2], 8, 64, 130)
 lbl("Min Pickup Value ($)", pages[2], 150, 46)
 local itemBox = inp("100", pages[2], 150, 64, 130)
 lbl("Max Bid Cap ($)", pages[2], 292, 46)
 local maxBidBox = inp("999999", pages[2], 292, 64, 158)
-
 local leaveBidBtn = btn("Leave if bid < min: OFF", pages[2], 8, 102, 220)
 local leaveMaxBtn = btn("Leave if bid > max: OFF", pages[2], 236, 102, 214)
 local leaveValBtn = btn("Leave if value < min: OFF", pages[2], 8, 138, 434)
-
 connect(leaveBidBtn.MouseButton1Click, function()
 	state.autoLeaveMinBid = not state.autoLeaveMinBid
 	leaveBidBtn.Text = "Leave if bid < min: "..(state.autoLeaveMinBid and "ON" or "OFF")
@@ -1124,8 +1159,6 @@ end)
 connect(rescanBtn.MouseButton1Click, function()
 	setStatus("Garages: "..scanGarages()); state.target=nil
 end)
-
--- areas (radio: only one location active at a time)
 local areaDisplay = {
 	{key="JunkYard",lbl="Junk Yard"},{key="BackAlley",lbl="Back Alley"},
 	{key="Farmyard",lbl="Farmyard"},{key="Shipyard",lbl="Shipyard"},
@@ -1138,19 +1171,15 @@ for i, a in ipairs(areaDisplay) do
 	local b = btn((isSelected and "[•] " or "[ ] ")..a.lbl, pages[2], x, y, 210)
 	areaBtns[a.key] = b
 	connect(b.MouseButton1Click, function()
-		-- deselect all
 		for _, ad in ipairs(areaDisplay) do
 			state.selected[ad.key] = false
 			if areaBtns[ad.key] then areaBtns[ad.key].Text = "[ ] "..ad.lbl end
 		end
-		-- select this one
 		state.selected[a.key] = true
 		b.Text = "[•] "..a.lbl
 		state.target = nil
 	end)
 end
-
--- whitelist
 local drinkIds = {"359","360","361"}; local diamondIds = {"357","358"}
 local whitelistLbl
 local function updateWhitelistLabel()
@@ -1182,17 +1211,12 @@ connect(whiteAddBtn.MouseButton1Click, function()
 	if id~="" then config.whitelist[id]=true; updateWhitelistLabel() end; whiteBox.Text=""
 end)
 connect(whiteClrBtn.MouseButton1Click, function() config.whitelist={}; updateWhitelistLabel() end)
-
--- lost & found toggle
 local lnfBtn = btn("[ ] Lost & Found Auto-Claim: OFF", pages[2], 8, 390, 434)
 connect(lnfBtn.MouseButton1Click, function()
 	state.autoLostFound = not state.autoLostFound
 	lnfBtn.Text = (state.autoLostFound and "[•] " or "[ ] ").."Lost & Found Auto-Claim: "..(state.autoLostFound and "ON" or "OFF")
-	if state.autoLostFound then
-		lastLostFoundCheck = 0 -- trigger a check immediately on next autoChecks tick
-	end
+	if state.autoLostFound then lastLostFoundCheck = 0 end
 end)
-
 -- PAGE 3: TELEPORT
 local tpEntries = {
 	{"Junk Yard",Vector3.new(19.9,1721.7,-24.3)},{"Back Alley",Vector3.new(-571.2,1721.3,-400)},
@@ -1206,7 +1230,6 @@ end
 connect(btn("My Base", pages[3], 8, 116, 212).MouseButton1Click, function()
 	teleportPlayer(CFrame.new(ownBase+Vector3.new(0,3,0)))
 end)
-
 -- PAGE 4: UNLOAD
 local autoUnloadBtn = btn("Auto-Unload: OFF", pages[4], 8, 8, 214)
 local autoShelfBtn  = btn("Auto-Shelf: OFF",  pages[4], 230, 8, 220)
@@ -1228,7 +1251,7 @@ end)
 local invCapDetectedLbl = lbl("Inv cap: auto-detecting...", pages[4], 8, 100)
 invCapDetectedLbl.TextColor3 = Color3.fromRGB(100,220,165)
 task.spawn(function()
-	task.wait(1) -- wait for player data to load
+	task.wait(1)
 	local detected = getMaxInventory()
 	state.invCap = detected
 	invCapDetectedLbl.Text = "Inv cap: "..detected.." (auto-detected)"
@@ -1260,13 +1283,12 @@ local function updateShelfBL()
 	local ids={}; for id in pairs(config.shelfBlacklist) do table.insert(ids,id) end
 	table.sort(ids); shelfBLlbl.Text=#ids>0 and table.concat(ids,",") or "(none)"
 end
-updateShelfBL() -- refresh label on load so it reflects all IDs in config
+updateShelfBL()
 connect(shelfBlAdd.MouseButton1Click, function()
 	local id=shelfBlBox.Text:match("^%s*(.-)%s*$")
 	if id~="" then config.shelfBlacklist[id]=true; updateShelfBL() end; shelfBlBox.Text=""
 end)
 connect(shelfBlClr.MouseButton1Click, function() config.shelfBlacklist={}; updateShelfBL() end)
-
 -- REFRESH
 refreshUi = function()
 	masterBtn.Text="Master: "..(state.master and "ON" or "OFF")
@@ -1278,7 +1300,9 @@ refreshUi = function()
 	weightLbl.Text=string.format("Vehicle: %.0f/%.0f kg (%d%%)", cw, lim, pct)
 end
 
--- EVENTS
+-- ══════════════════════════════════════════════════════════════
+-- EVENT HANDLERS
+-- ══════════════════════════════════════════════════════════════
 connect(masterBtn.MouseButton1Click, function()
 	state.master=not state.master; setStatus(state.master and "Master ON" or "Master OFF")
 end)
@@ -1288,19 +1312,27 @@ end)
 connect(updateBid.OnClientEvent, function(bid, bidder)
 	state.currentBid=tonumber(bid) or 0
 	if bidder=="Starting" then state.startingBid=state.currentBid end
+	dbg(string.format("updateBid: bid=$%d bidder=%s", state.currentBid, tostring(bidder)))
 	local checkBid=state.currentBid>0 and state.currentBid or state.startingBid
 	if state.autoLeaveMinBid and checkBid>0 and checkBid<state.autoLeaveMinBidAmt then leaveAuction(); setStatus("Left: bid $"..checkBid.." < $"..state.autoLeaveMinBidAmt) end
 	if state.autoLeaveMaxBid and checkBid>0 and checkBid>state.autoLeaveMaxBidAmt then leaveAuction(); setStatus("Left: bid $"..checkBid.." > $"..state.autoLeaveMaxBidAmt) end
 	refreshUi()
 end)
-connect(toggleBid.OnClientEvent, function(open) if open then state.inAuction=true; setStatus("Bidding") end end)
+connect(toggleBid.OnClientEvent, function(open)
+	dbg("toggleBid: open=" .. tostring(open))
+	if open then
+		state.inAuction = true
+		state.inAuctionSince = os.clock()
+		setStatus("Bidding")
+	end
+end)
 connect(toggleAuctionArea.OnClientEvent, function(active, g)
+	dbg(string.format("toggleAuctionArea: active=%s garage=%s", tostring(active), g and g.Name or "nil"))
 	state.currentAuctionGarage=g; state.inAuction=active
 	if active then
+		state.inAuctionSince = os.clock()
 		setStatus("Auction: "..(g and g.Name or "?"))
-		-- reset target timer so farmStep won't timeout and switch garages mid-auction
 		state.targetStarted = os.clock()
-		-- immediately TP back to the auction zone (game gives ~10s window)
 		if state.farm then
 			task.spawn(function()
 				local zone = g and g:FindFirstChild("AuctionZone", true)
@@ -1314,31 +1346,36 @@ connect(toggleAuctionArea.OnClientEvent, function(active, g)
 		if state.autoLeaveValueMin and state.startingBid>0 and state.startingBid<state.autoLeaveValueAmt then
 			task.wait(0.5); leaveAuction(); setStatus("Left: value $"..state.startingBid.." < $"..state.autoLeaveValueAmt)
 		end
+	else
+		dbg("toggleAuctionArea: auction area closed → inAuction=false")
 	end
 end)
 connect(pickupEnd.OnClientEvent, function()
+	dbg("pickupEnd fired")
 	state.inAuction=false
 	if not state.collecting then state.won=false end
 	setStatus("Pickup ended")
 end)
-connect(pickupStart.OnClientEvent, function() finalizeWin() end)
-
--- Notify handler: "vehicle too far" → respawn mid-pickup; "Sold ..." → shelf slot opened
+connect(pickupStart.OnClientEvent, function()
+	dbg("pickupStart fired → finalizeWin()")
+	finalizeWin()
+end)
 connect(notifyRemote.OnClientEvent, function(msg)
 	if type(msg) ~= "string" then return end
+	dbg("notify: " .. msg)
 	local lmsg = msg:lower()
 	if lmsg:find("too far") and state.collecting then
+		dbg("notify: vehicle too far → vehicleFarSignal=true")
 		state.vehicleFarSignal = true
 	end
 	if lmsg:find("^sold ") and state.autoShelf then
-		-- an item sold = a shelf slot just freed up; trigger stocking on next autoChecks tick
+		dbg("notify: item sold → shelf slot available")
 		state.shelfSlotAvailable = true
 		lastShelfCheck = 0
 	end
 end)
-
--- auto-dismiss overweight popup + signal pickup loop to bail out
 connect(offerOverweightAdd.OnClientEvent, function()
+	dbg("offerOverweightAdd fired → overweightSignal=true")
 	state.overweightSignal = true
 	task.wait(0.1)
 	for _, obj in ipairs(playerGui:GetDescendants()) do
@@ -1353,6 +1390,9 @@ connect(offerOverweightAdd.OnClientEvent, function()
 	end
 end)
 
+-- ══════════════════════════════════════════════════════════════
+-- HEARTBEAT
+-- ══════════════════════════════════════════════════════════════
 local lastUIRefresh = 0
 connect(RunService.Heartbeat, function()
 	if state.master and state.farm then pcall(farmStep) end
@@ -1360,6 +1400,9 @@ connect(RunService.Heartbeat, function()
 	if os.clock()-lastUIRefresh >= 1.5 then lastUIRefresh=os.clock(); pcall(refreshUi) end
 end)
 
+-- ══════════════════════════════════════════════════════════════
+-- GLOBALS
+-- ══════════════════════════════════════════════════════════════
 getgenv().SH_SetFarm = function(v)
 	state.farm=v==true
 	if state.farm then scanGarages(); state.target=nil; state.index=0 end
@@ -1367,5 +1410,27 @@ getgenv().SH_SetFarm = function(v)
 end
 getgenv().SH_State = state
 
+-- SH_Dump(): call this anytime in the console to get a full state snapshot
+getgenv().SH_Dump = function()
+	local now = os.clock()
+	local cw, lim = getVehicleWeight()
+	warn("══════ SH MANUAL DUMP ══════")
+	warn(string.format("farm=%s  master=%s  autoWin=%s", tostring(state.farm), tostring(state.master), tostring(state.autoWin)))
+	warn(string.format("won=%s  collecting=%s (%.0fs ago started)  inAuction=%s (%.0fs ago started)",
+		tostring(state.won), tostring(state.collecting), now - state.collectingSince,
+		tostring(state.inAuction), now - state.inAuctionSince))
+	warn(string.format("unloading=%s  shelving=%s  lnfRunning=%s", tostring(state.unloading), tostring(state.shelving), tostring(state.lostFoundRunning)))
+	warn(string.format("overweightSig=%s  vehicleFarSig=%s  shelfSlotAvail=%s",
+		tostring(state.overweightSignal), tostring(state.vehicleFarSignal), tostring(state.shelfSlotAvailable)))
+	warn(string.format("garages=%d  target=%s  index=%d", #state.garages, state.target and state.target.name or "nil", state.index))
+	warn(string.format("lastLeaveTime=%.1fs ago  lastScan=%.1fs ago  targetTimeout=%ds",
+		now - lastLeaveTime, now - state.lastScan, state.targetTimeout))
+	warn(string.format("vehicle=%.0f/%.0fkg  unloadPct=%d%%  invCap=%d", cw, lim, state.unloadPct, state.invCap))
+	warn("════════════════════════════")
+end
+
+-- ══════════════════════════════════════════════════════════════
+-- INIT
+-- ══════════════════════════════════════════════════════════════
 scanGarages(); refreshUi()
-print("[SH v8 phone] Loaded")
+print("[SH v8.1-debug] Loaded — call SH_Dump() anytime for a full state snapshot")
