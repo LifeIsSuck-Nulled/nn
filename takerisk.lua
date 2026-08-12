@@ -86,16 +86,84 @@ local state = {
 local config = {
 	minBid = 0, minItemValue = 100, hitTolerance = 0.0075,
 	whitelist = {
-		["376"] = true, -- Gavel Trophy (110 kg, $10)
-		["562"] = true, -- Race Trophy (38 kg, $1040)
-		["635"] = true, -- Wooden Certificate Of Authenticity
-		["735"] = true, -- Premium Certificate Of Authenticity
-		["764"] = true, -- Ripped Certificate Of Authenticity
+		-- Trophies & Certificates (original)
+		["376"]=true, -- Gavel Trophy
+		["562"]=true, -- Race Trophy
+		["635"]=true, -- Wooden Certificate Of Authenticity
+		["735"]=true, -- Premium Certificate Of Authenticity
+		["764"]=true, -- Ripped Certificate Of Authenticity
+		-- Accessories (90 items — always farm, bypass min value)
+		["1"]=true,["5"]=true,["17"]=true,["44"]=true,["50"]=true,
+		["67"]=true,["81"]=true,["101"]=true,["348"]=true,["362"]=true,
+		["363"]=true,["365"]=true,["366"]=true,["367"]=true,["368"]=true,
+		["371"]=true,["372"]=true,["373"]=true,["410"]=true,["478"]=true,
+		["479"]=true,["480"]=true,["482"]=true,["483"]=true,["484"]=true,
+		["485"]=true,["486"]=true,["487"]=true,["488"]=true,["489"]=true,
+		["490"]=true,["491"]=true,["492"]=true,["493"]=true,["495"]=true,
+		["496"]=true,["497"]=true,["498"]=true,["499"]=true,["500"]=true,
+		["501"]=true,["543"]=true,["544"]=true,["547"]=true,["556"]=true,
+		["557"]=true,["558"]=true,["570"]=true,["576"]=true,["613"]=true,
+		["614"]=true,["615"]=true,["616"]=true,["617"]=true,["619"]=true,
+		["620"]=true,["621"]=true,["622"]=true,["626"]=true,["627"]=true,
+		["628"]=true,["674"]=true,["675"]=true,["676"]=true,["715"]=true,
+		["716"]=true,["720"]=true,["721"]=true,["730"]=true,["731"]=true,
+		["732"]=true,["745"]=true,["746"]=true,["747"]=true,["757"]=true,
+		["790"]=true,["791"]=true,["800"]=true,["808"]=true,["812"]=true,
+		["813"]=true,["815"]=true,["821"]=true,["829"]=true,["830"]=true,
+		["831"]=true,["832"]=true,["841"]=true,["842"]=true,["843"]=true,
+		-- Vehicle Parts: Spoilers (15)
+		["502"]=true,["503"]=true,["509"]=true,["510"]=true,["518"]=true,
+		["519"]=true,["521"]=true,["522"]=true,["524"]=true,["736"]=true,
+		["737"]=true,["738"]=true,["739"]=true,["751"]=true,["826"]=true,
+		-- Vehicle Parts: Exhausts (17)
+		["504"]=true,["505"]=true,["506"]=true,["507"]=true,["511"]=true,
+		["512"]=true,["520"]=true,["523"]=true,["525"]=true,["526"]=true,
+		["740"]=true,["741"]=true,["742"]=true,["744"]=true,["752"]=true,
+		["822"]=true,["825"]=true,
+		-- Vehicle Parts: Wheels (11)
+		["577"]=true,["578"]=true,["579"]=true,["580"]=true,["581"]=true,
+		["582"]=true,["583"]=true,["743"]=true,["753"]=true,["823"]=true,
+		["824"]=true,
 	},
 	shelfBlacklist = {
-		["357"] = true, ["358"] = true,
-		["359"] = true, ["360"] = true, ["361"] = true,
-		["635"] = true, ["735"] = true, ["764"] = true,
+		-- Drinks & Diamonds (original)
+		["357"]=true,["358"]=true,
+		["359"]=true,["360"]=true,["361"]=true,
+		-- Trophies & Certificates
+		["376"]=true,["562"]=true,
+		["635"]=true,["735"]=true,["764"]=true,
+		-- Accessories (90 items — wearables don't belong on shop shelf)
+		["1"]=true,["5"]=true,["17"]=true,["44"]=true,["50"]=true,
+		["67"]=true,["81"]=true,["101"]=true,["348"]=true,["362"]=true,
+		["363"]=true,["365"]=true,["366"]=true,["367"]=true,["368"]=true,
+		["371"]=true,["372"]=true,["373"]=true,["410"]=true,["478"]=true,
+		["479"]=true,["480"]=true,["482"]=true,["483"]=true,["484"]=true,
+		["485"]=true,["486"]=true,["487"]=true,["488"]=true,["489"]=true,
+		["490"]=true,["491"]=true,["492"]=true,["493"]=true,["495"]=true,
+		["496"]=true,["497"]=true,["498"]=true,["499"]=true,["500"]=true,
+		["501"]=true,["543"]=true,["544"]=true,["547"]=true,["556"]=true,
+		["557"]=true,["558"]=true,["570"]=true,["576"]=true,["613"]=true,
+		["614"]=true,["615"]=true,["616"]=true,["617"]=true,["619"]=true,
+		["620"]=true,["621"]=true,["622"]=true,["626"]=true,["627"]=true,
+		["628"]=true,["674"]=true,["675"]=true,["676"]=true,["715"]=true,
+		["716"]=true,["720"]=true,["721"]=true,["730"]=true,["731"]=true,
+		["732"]=true,["745"]=true,["746"]=true,["747"]=true,["757"]=true,
+		["790"]=true,["791"]=true,["800"]=true,["808"]=true,["812"]=true,
+		["813"]=true,["815"]=true,["821"]=true,["829"]=true,["830"]=true,
+		["831"]=true,["832"]=true,["841"]=true,["842"]=true,["843"]=true,
+		-- Vehicle Parts: Spoilers (15)
+		["502"]=true,["503"]=true,["509"]=true,["510"]=true,["518"]=true,
+		["519"]=true,["521"]=true,["522"]=true,["524"]=true,["736"]=true,
+		["737"]=true,["738"]=true,["739"]=true,["751"]=true,["826"]=true,
+		-- Vehicle Parts: Exhausts (17)
+		["504"]=true,["505"]=true,["506"]=true,["507"]=true,["511"]=true,
+		["512"]=true,["520"]=true,["523"]=true,["525"]=true,["526"]=true,
+		["740"]=true,["741"]=true,["742"]=true,["744"]=true,["752"]=true,
+		["822"]=true,["825"]=true,
+		-- Vehicle Parts: Wheels (11)
+		["577"]=true,["578"]=true,["579"]=true,["580"]=true,["581"]=true,
+		["582"]=true,["583"]=true,["743"]=true,["753"]=true,["823"]=true,
+		["824"]=true,
 	}
 }
 
