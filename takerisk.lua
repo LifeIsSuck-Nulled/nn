@@ -79,6 +79,8 @@ local state = {
 	shelfSlotAvailable = false, -- set true when a "Sold" notification confirms a slot opened
 	-- lost & found
 	autoLostFound = false, lostFoundRunning = false,
+	-- inventory cap (auto-detected; override if needed)
+	invCap = 10,
 }
 
 local config = {
@@ -505,6 +507,16 @@ local function getVehicleWeight()
 	if not vm then return 0, 0 end
 	return tonumber(vm:GetAttribute("CargoWeight")) or 0, tonumber(vm:GetAttribute("CargoWeightLimit")) or 0
 end
+local function getMaxInventory()
+	-- try known player attributes first
+	local cap = tonumber(player:GetAttribute("InventoryCapacity"))
+		or tonumber(player:GetAttribute("MaxInventory"))
+		or tonumber(player:GetAttribute("InventorySize"))
+		or tonumber(player:GetAttribute("MaxInventorySlots"))
+	if cap and cap > 0 then return cap end
+	-- fallback: user-set override (state.invCap), default 10
+	return state.invCap or 10
+end
 isOverweight = function()
 	local cw, lim = getVehicleWeight()
 	return lim > 0 and (cw/lim*100) >= state.unloadPct
@@ -602,7 +614,7 @@ doUnloadAndStock = function()
 		local ok2, inv = pcall(function() return getInventory:InvokeServer() end)
 		local invCount = 0
 		if ok2 and type(inv) == "table" then for _ in pairs(inv) do invCount = invCount + 1 end end
-		local freeSlots = 10 - invCount
+		local freeSlots = getMaxInventory() - invCount
 		if freeSlots <= 0 then
 			if state.autoShelf then
 				setStatus("Inventory full, stocking shelves first...")
@@ -952,17 +964,32 @@ connect(exitBtn.MouseButton1Click, function() cleanup() end)
 local statusLbl = lbl("Ready", pages[1], 8, 84)
 local weightLbl = lbl("Vehicle: -- / -- kg", pages[1], 8, 104)
 
--- Mobile scale toggle
-local mobileScaleBtn = btn("[ ] Mobile Scale (0.72x)", pages[1], 8, 128, 220)
-connect(mobileScaleBtn.MouseButton1Click, function()
-	if uiScaleObj.Scale < 0.9 then
-		uiScaleObj.Scale = 1.0
-		mobileScaleBtn.Text = "[ ] Mobile Scale (0.72x)"
-	else
-		uiScaleObj.Scale = 0.72
-		mobileScaleBtn.Text = "[•] Mobile Scale (0.72x)"
+-- UI Scale controls (step 0.05, range 0.40x – 1.50x)
+do
+	local scaleLbl = Instance.new("TextLabel", pages[1])
+	scaleLbl.Position = UDim2.fromOffset(8, 128)
+	scaleLbl.Size = UDim2.fromOffset(440, 18)
+	scaleLbl.BackgroundTransparency = 1
+	scaleLbl.Font = Enum.Font.GothamBold; scaleLbl.TextSize = 11
+	scaleLbl.TextXAlignment = Enum.TextXAlignment.Left
+	scaleLbl.TextColor3 = Color3.fromRGB(140,200,180)
+	scaleLbl.Text = "UI Scale: 1.00x  (tap – / + to resize)"
+
+	local scaleDownBtn = btn("   –   ", pages[1], 8, 150, 80)
+	local scaleUpBtn   = btn("   +   ", pages[1], 96, 150, 80)
+	local scaleResetBtn = btn("Reset 1x", pages[1], 184, 150, 100)
+
+	local function applyScale(s)
+		s = math.floor(s * 100 + 0.5) / 100          -- round to 2dp
+		s = math.max(0.40, math.min(1.50, s))
+		uiScaleObj.Scale = s
+		scaleLbl.Text = string.format("UI Scale: %.2fx  (tap – / + to resize)", s)
 	end
-end)
+
+	connect(scaleDownBtn.MouseButton1Click,  function() applyScale(uiScaleObj.Scale - 0.05) end)
+	connect(scaleUpBtn.MouseButton1Click,    function() applyScale(uiScaleObj.Scale + 0.05) end)
+	connect(scaleResetBtn.MouseButton1Click, function() applyScale(1.0) end)
+end
 
 connect(tpBtn.MouseButton1Click, function()
 	state.teleportMethod = state.teleportMethod=="Instant" and "Tween" or "Instant"
@@ -1116,18 +1143,37 @@ connect(weightSetBtn.MouseButton1Click, function()
 	state.unloadPct=tonumber(weightPctBox.Text) or 90
 	setStatus("Unload at "..state.unloadPct.."%")
 end)
-connect(btn("Unload + Stock Now", pages[4], 8, 106, 214).MouseButton1Click, function()
+local invCapDetectedLbl = lbl("Inv cap: auto-detecting...", pages[4], 8, 100)
+invCapDetectedLbl.TextColor3 = Color3.fromRGB(100,220,165)
+task.spawn(function()
+	task.wait(1) -- wait for player data to load
+	local detected = getMaxInventory()
+	state.invCap = detected
+	invCapDetectedLbl.Text = "Inv cap: "..detected.." (auto-detected)"
+end)
+lbl("Override inv cap (if wrong):", pages[4], 230, 84)
+local invCapBox = inp(tostring(state.invCap), pages[4], 230, 100, 80)
+local invCapSetBtn = btn("Set", pages[4], 318, 100, 60)
+connect(invCapSetBtn.MouseButton1Click, function()
+	local v = tonumber(invCapBox.Text)
+	if v and v > 0 then
+		state.invCap = v
+		invCapDetectedLbl.Text = "Inv cap: "..v.." (manual)"
+		setStatus("Inv cap set to "..v)
+	end
+end)
+connect(btn("Unload + Stock Now", pages[4], 8, 138, 214).MouseButton1Click, function()
 	task.spawn(doUnloadAndStock)
 end)
-connect(btn("Stock Shelves Only", pages[4], 230, 106, 220).MouseButton1Click, function()
+connect(btn("Stock Shelves Only", pages[4], 230, 138, 220).MouseButton1Click, function()
 	task.spawn(function() setStatus("Stocking..."); local n=stockShelves(); setStatus("Stocked "..n.." items") end)
 end)
-lbl("Shelf Blacklist (never placed on shelf):", pages[4], 8, 144)
-local shelfBLlbl = lbl("357,358,359,360,361,635,735,764", pages[4], 8, 160)
+lbl("Shelf Blacklist (never placed on shelf):", pages[4], 8, 176)
+local shelfBLlbl = lbl("357,358,359,360,361,635,735,764", pages[4], 8, 192)
 shelfBLlbl.TextColor3=Color3.fromRGB(220,100,100)
-local shelfBlBox = inp("", pages[4], 8, 180, 270); shelfBlBox.PlaceholderText="Add item ID..."
-local shelfBlAdd = btn("Add", pages[4], 286, 180, 60)
-local shelfBlClr = btn("Clear all", pages[4], 354, 180, 96)
+local shelfBlBox = inp("", pages[4], 8, 210, 270); shelfBlBox.PlaceholderText="Add item ID..."
+local shelfBlAdd = btn("Add", pages[4], 286, 210, 60)
+local shelfBlClr = btn("Clear all", pages[4], 354, 210, 96)
 local function updateShelfBL()
 	local ids={}; for id in pairs(config.shelfBlacklist) do table.insert(ids,id) end
 	table.sort(ids); shelfBLlbl.Text=#ids>0 and table.concat(ids,",") or "(none)"
