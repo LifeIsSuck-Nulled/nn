@@ -268,6 +268,12 @@ local function startPromptLoop(g)
 				task.wait(0.3)
 			end
 		end
+		-- all 15 attempts exhausted without getting a bid bar → another player won first
+		-- clear target so farmStep immediately picks the next garage on the next tick
+		if alive and state.farm and not state.won and not findBidBar() then
+			setStatus("Missed auction — moving to next garage")
+			state.target = nil
+		end
 	end)
 end
 
@@ -492,6 +498,9 @@ collectWonItems = function()
 		local moved, repaired = moveAllWonToVehicle()
 		setStatus(string.format("Collected %d items, %d crates | moved %d (%d repaired)", collected, opened, moved, repaired))
 		state.won = false; state.wonGarage = nil; state.collecting = false
+		state.inAuction = false -- clear in case pickupEnd raced or didn't fire; farmStep must not block
+		state.target = nil      -- force chooseNextGarage on the next farmStep tick
+		state.lastScan = 0      -- force a fresh garage scan so the list is up to date
 
 		if state.autoUnload and isOverweight() and not state.unloading then
 			task.spawn(doUnloadAndStock)
