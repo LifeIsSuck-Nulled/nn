@@ -874,6 +874,29 @@ panel.BackgroundColor3 = Color3.fromRGB(14,17,24); panel.BorderSizePixel = 0; pa
 Instance.new("UICorner", panel).CornerRadius = UDim.new(0,10)
 local pstroke = Instance.new("UIStroke", panel); pstroke.Color = Color3.fromRGB(52,148,118); pstroke.Thickness = 1
 
+-- ── MOBILE ADDITIONS ─────────────────────────────────────────
+-- UIScale so the whole panel can be shrunk for small screens
+local uiScaleObj = Instance.new("UIScale", panel)
+uiScaleObj.Scale = 1.0
+
+-- Floating hide/show toggle (always visible even when panel is hidden)
+local floatBtn = Instance.new("TextButton", gui)
+floatBtn.Size = UDim2.fromOffset(60, 24)
+floatBtn.Position = UDim2.fromOffset(8, 36)
+floatBtn.BackgroundColor3 = Color3.fromRGB(20,60,45)
+floatBtn.BorderSizePixel = 0
+floatBtn.Font = Enum.Font.GothamBold
+floatBtn.TextSize = 11
+floatBtn.TextColor3 = Color3.fromRGB(235,245,250)
+floatBtn.Text = "SH ▼"
+do local c = Instance.new("UICorner", floatBtn); c.CornerRadius = UDim.new(0,5) end
+do local s = Instance.new("UIStroke", floatBtn); s.Color = Color3.fromRGB(52,148,118); s.Thickness = 1 end
+connect(floatBtn.MouseButton1Click, function()
+	panel.Visible = not panel.Visible
+	floatBtn.Text = panel.Visible and "SH ▼" or "SH ▶"
+end)
+-- ─────────────────────────────────────────────────────────────
+
 do
 	local drag, ds, dp = false, nil, nil
 	panel.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then drag=true;ds=i.Position;dp=panel.Position end end)
@@ -928,6 +951,18 @@ exitBtn.BackgroundColor3=Color3.fromRGB(80,30,30); exitBtn.TextColor3=Color3.fro
 connect(exitBtn.MouseButton1Click, function() cleanup() end)
 local statusLbl = lbl("Ready", pages[1], 8, 84)
 local weightLbl = lbl("Vehicle: -- / -- kg", pages[1], 8, 104)
+
+-- Mobile scale toggle
+local mobileScaleBtn = btn("[ ] Mobile Scale (0.72x)", pages[1], 8, 128, 220)
+connect(mobileScaleBtn.MouseButton1Click, function()
+	if uiScaleObj.Scale < 0.9 then
+		uiScaleObj.Scale = 1.0
+		mobileScaleBtn.Text = "[ ] Mobile Scale (0.72x)"
+	else
+		uiScaleObj.Scale = 0.72
+		mobileScaleBtn.Text = "[•] Mobile Scale (0.72x)"
+	end
+end)
 
 connect(tpBtn.MouseButton1Click, function()
 	state.teleportMethod = state.teleportMethod=="Instant" and "Tween" or "Instant"
@@ -1191,4 +1226,4 @@ end
 getgenv().SH_State = state
 
 scanGarages(); refreshUi()
-print("[SH v8 overweight] Loaded")
+print("[SH v8 phone] Loaded")
