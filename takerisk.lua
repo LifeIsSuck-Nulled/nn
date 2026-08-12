@@ -259,11 +259,14 @@ end
 local function startPromptLoop(g)
 	task.spawn(function()
 		for _ = 1, 15 do
-			-- stop immediately if we're already in an auction (server confirmed)
-			if not alive or not state.farm or state.won or state.inAuction or findBidBar() then return end
+			if not alive or not state.farm or state.won or findBidBar() then return end
 			local p = g.instance:FindFirstChild("EnterAuction", true)
-			if p and p:IsA("ProximityPrompt") and p.Enabled then triggerPrompt(p) end
-			task.wait(0.3)
+			if p and p:IsA("ProximityPrompt") and p.Enabled then
+				triggerPrompt(p)
+				task.wait(1.5) -- wait for bid bar to appear before retrying (reduces "already in auction" spam)
+			else
+				task.wait(0.3)
+			end
 		end
 	end)
 end
@@ -1253,11 +1256,6 @@ connect(notifyRemote.OnClientEvent, function(msg)
 		-- an item sold = a shelf slot just freed up; trigger stocking on next autoChecks tick
 		state.shelfSlotAvailable = true
 		lastShelfCheck = 0
-	end
-	-- server says we're already in an auction → mark it so startPromptLoop stops spamming
-	if lmsg:find("already") and lmsg:find("auction") then
-		state.inAuction = true
-		state.targetStarted = os.clock() -- also reset timer so farmStep doesn't switch garages
 	end
 end)
 
