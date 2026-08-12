@@ -259,7 +259,8 @@ end
 local function startPromptLoop(g)
 	task.spawn(function()
 		for _ = 1, 15 do
-			if not alive or not state.farm or state.won or findBidBar() then return end
+			-- stop immediately if we're already in an auction (server confirmed)
+			if not alive or not state.farm or state.won or state.inAuction or findBidBar() then return end
 			local p = g.instance:FindFirstChild("EnterAuction", true)
 			if p and p:IsA("ProximityPrompt") and p.Enabled then triggerPrompt(p) end
 			task.wait(0.3)
@@ -283,6 +284,7 @@ local function farmStep()
 	if #state.garages == 0 or os.clock() - state.lastScan >= 10 then scanGarages() end
 	if tryBid() then return end
 	if state.won or state.collecting then return end
+	if state.inAuction then return end -- don't switch garages while server says we're in an auction
 	if os.clock() - lastLeaveTime < 2.5 then return end -- cooldown after leaving auction (prevents instant re-TP)
 	if state.target and os.clock() - state.targetStarted < state.targetTimeout then return end
 	state.target = nil; chooseNextGarage()
@@ -1215,6 +1217,19 @@ connect(toggleAuctionArea.OnClientEvent, function(active, g)
 	state.currentAuctionGarage=g; state.inAuction=active
 	if active then
 		setStatus("Auction: "..(g and g.Name or "?"))
+		-- reset target timer so farmStep won't timeout and switch garages mid-auction
+		state.targetStarted = os.clock()
+		-- immediately TP back to the auction zone (game gives ~10s window)
+		if state.farm then
+			task.spawn(function()
+				local zone = g and g:FindFirstChild("AuctionZone", true)
+				if zone then
+					teleportPlayer(zone.CFrame * CFrame.new(0, 2, -4))
+				elseif state.target and state.target.zone then
+					teleportPlayer(state.target.zone.CFrame * CFrame.new(0, 2, -4))
+				end
+			end)
+		end
 		if state.autoLeaveValueMin and state.startingBid>0 and state.startingBid<state.autoLeaveValueAmt then
 			task.wait(0.5); leaveAuction(); setStatus("Left: value $"..state.startingBid.." < $"..state.autoLeaveValueAmt)
 		end
@@ -1238,6 +1253,11 @@ connect(notifyRemote.OnClientEvent, function(msg)
 		-- an item sold = a shelf slot just freed up; trigger stocking on next autoChecks tick
 		state.shelfSlotAvailable = true
 		lastShelfCheck = 0
+	end
+	-- server says we're already in an auction → mark it so startPromptLoop stops spamming
+	if lmsg:find("already") and lmsg:find("auction") then
+		state.inAuction = true
+		state.targetStarted = os.clock() -- also reset timer so farmStep doesn't switch garages
 	end
 end)
 
