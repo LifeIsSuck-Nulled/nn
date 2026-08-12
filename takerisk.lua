@@ -1260,6 +1260,7 @@ local function updateShelfBL()
 	local ids={}; for id in pairs(config.shelfBlacklist) do table.insert(ids,id) end
 	table.sort(ids); shelfBLlbl.Text=#ids>0 and table.concat(ids,",") or "(none)"
 end
+updateShelfBL() -- refresh label on load so it reflects all IDs in config
 connect(shelfBlAdd.MouseButton1Click, function()
 	local id=shelfBlBox.Text:match("^%s*(.-)%s*$")
 	if id~="" then config.shelfBlacklist[id]=true; updateShelfBL() end; shelfBlBox.Text=""
