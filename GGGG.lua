@@ -19,8 +19,11 @@ local PRO = Net:RemoteEvent("PrinterOpen")
 local ASRQ = Net:RemoteEvent("AccessoryShopRequest")
 local EBR = Net:RemoteEvent("ElectricityBillingRequest")
 local EBS = Net:RemoteEvent("ElectricityBillingState")
+local MO  = Net:RemoteEvent("MerchantOpen")
+local MRQ = Net:RemoteEvent("MerchantRequest")
+local MS  = Net:RemoteEvent("MerchantSpawned")
 
-local AA, AC, AF, AE, AAFK, AP, AB = false,false,false,false,false,false,false
+local AA, AC, AF, AE, AAFK, AP, AB, AM = false,false,false,false,false,false,false,false
 local HLP, CPos = nil, nil
 local ShopPC = CFrame.new(-240,8,136); local ShopGroc = CFrame.new(-103,8,11)
 local PCItems, GroceryItems, AccItems = {}, {}, {}
@@ -37,7 +40,8 @@ if Per.AutoPrint   then AP=true end
 local billState = nil -- { PayableBill, Outage, Grace, ... } fed by periodic poll
 local billBusy = false -- bill loop owns the scheduler while it pays
 local billNext = 0 -- next wall time the 15s pay cycle may run
-if Per.AutoBill    then AB=true end
+if Per.AutoBill     then AB=true end
+if Per.AutoMerchant then AM=true end
 
 local Sid = (getgenv().LabaHubSession or 0)+1; getgenv().LabaHubSession = Sid
 local function alive() return getgenv().LabaHubSession == Sid end
@@ -1774,6 +1778,7 @@ local te = ht:AddToggle({ Name="Auto Fire Extinguisher", Value=AE, Key="AutoExt"
 local tak = ht:AddToggle({ Name="Anti AFK", Value=AAFK, Key="AntiAFK", Callback=function(v)AAFK=v;Per.AntiAFK=v end })
 	local tbAP = ht:AddToggle({ Name="Auto Print (buy ink<20/paper<20)", Value=AP, Key="AutoPrint", Callback=function(v)AP=v;Per.AutoPrint=v end })
 	local tbAB = ht:AddToggle({ Name="Auto Pay Bills", Value=AB, Key="AutoBill", Callback=function(v)AB=v;Per.AutoBill=v end })
+	local tbAM = ht:AddToggle({ Name="Auto Merchant (buy all when merchant arrives)", Value=AM, Key="AutoMerchant", Callback=function(v)AM=v;Per.AutoMerchant=v end })
 
 -- Anti-AFK heartbeat (prevents Roblox idle kick)
 task.spawn(function()
@@ -2115,6 +2120,60 @@ local function doPayBills()
 	EBR:FireServer("Pay")
 	task.wait(0.5)
 end
+-- Auto Merchant: fire proximity prompt → capture MerchantOpen data → buy all in-stock → close
+local merchantBusy = false
+local function doMerchant()
+	if not AM or merchantBusy then return end
+	merchantBusy = true
+	pcall(function()
+		local WS = game:GetService("Workspace")
+		local tm = WS:FindFirstChild("TravelingMerchant")
+		if not tm then return end
+		-- Find any ProximityPrompt on the merchant
+		local pr = nil
+		for _, v in ipairs(tm:GetDescendants()) do
+			if v:IsA("ProximityPrompt") then pr = v; break end
+		end
+		if not pr then return end
+		-- Hook MerchantOpen BEFORE firing so we don't miss the callback
+		local captured = nil
+		local conn = MO.OnClientEvent:Connect(function(data) captured = data end)
+		-- Teleport near merchant and fire prompt
+		local c = LP.Character
+		local h  = c and c:FindFirstChild("HumanoidRootPart")
+		local hm = c and c:FindFirstChildWhichIsA("Humanoid")
+		if h then
+			h.CFrame = CFrame.new(pr.Parent.Position + Vector3.new(0, 3, 3))
+			task.wait(0.3)
+			if hm then hm.Sit = false end
+			task.wait(0.1)
+		end
+		local oL, oD = pr.RequiresLineOfSight, pr.MaxActivationDistance
+		pr.RequiresLineOfSight = false; pr.MaxActivationDistance = 50
+		if fireproximityprompt then fireproximityprompt(pr) end
+		pr.RequiresLineOfSight = oL; pr.MaxActivationDistance = oD
+		-- Wait up to 5s for the shop to send us its session data
+		local t0 = os.clock()
+		repeat task.wait(0.1) until captured or os.clock() - t0 > 5
+		conn:Disconnect()
+		if not captured or type(captured.Token) ~= "string" then return end
+		local token, rev, cycleId = captured.Token, captured.Revision, captured.CycleId
+		-- Buy every item that still has stock
+		if type(captured.Offers) == "table" then
+			for _, offer in ipairs(captured.Offers) do
+				if type(offer.Stock) == "number" and offer.Stock > 0 then
+					MRQ:FireServer("Purchase", token, rev, cycleId, offer.Id)
+					rev = rev + 1
+					task.wait(0.5)
+				end
+			end
+		end
+		-- Close the shop cleanly
+		MRQ:FireServer("Close", token, rev, cycleId, nil)
+	end)
+	merchantBusy = false
+end
+
 -- Dedicated bill loop: every 30s, pause the scheduler, pay the bill, resume.
 task.spawn(function()
 	while alive() do
@@ -2165,3 +2224,14 @@ local SCHED = {
 			end
 		end
 	end)
+
+-- Auto Merchant: hook MerchantSpawned so we auto-buy whenever the merchant arrives
+MS.OnClientEvent:Connect(function()
+	if AM and alive() then task.delay(1, function() if alive() then task.spawn(doMerchant) end end) end
+end)
+-- Also trigger immediately if merchant is already here when script starts
+task.delay(3, function()
+	if AM and alive() and game:GetService("Workspace"):FindFirstChild("TravelingMerchant") then
+		task.spawn(doMerchant)
+	end
+end)
