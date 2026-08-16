@@ -72,12 +72,29 @@ local function custNear()
 	return best~=nil and best<=8
 end
 
+local CARPET_SIZE = Vector3.new(2.0705466270446777, 0.20394206047058105, 7.935398578643799)
+local function getCarpet()
+	local b=ob();if not b then return nil end
+	local deco=b:FindFirstChild("Decoration");if not deco then return nil end
+	for _,p in ipairs(deco:GetChildren()) do
+		if p:IsA("BasePart") and p.Name=="Carpet" then
+			local s=p.Size
+			if math.abs(s.X-CARPET_SIZE.X)<0.01 and math.abs(s.Y-CARPET_SIZE.Y)<0.01 and math.abs(s.Z-CARPET_SIZE.Z)<0.01 then return p end
+		end
+	end
+end
+
 local function doAppoint()
 	local c=LP.Character;local h=c and c:FindFirstChild("HumanoidRootPart");local hm=c and c:FindFirstChildWhichIsA("Humanoid");if not h or not hm or hm.Health<=0 then return end;rp()
 	local sf=LP.PlayerGui:FindFirstChild("MainUi")and LP.PlayerGui.MainUi:FindFirstChild("ServerFrame");if not sf or sf.Visible then return end;if not hc()or vp()==0 then return end
 	if not custNear() then return end
 	local pr=fl(h);if not pr then return end;local pa=pr.Parent
-	if(h.Position-pa.Position).Magnitude>2.5 then h.CFrame=pa.CFrame*CFrame.new(0,3,2.5);task.wait(0.4);hm.Sit=false;task.wait(0.4)end
+	local carpet=getCarpet()
+	if carpet then
+		local cp=carpet.Position;h.CFrame=CFrame.new(cp.X-1.5,cp.Y+3,cp.Z);task.wait(0.4);hm.Sit=false;task.wait(0.4)
+	elseif(h.Position-pa.Position).Magnitude>2.5 then
+		h.CFrame=pa.CFrame*CFrame.new(0,3,2.5);task.wait(0.4);hm.Sit=false;task.wait(0.4)
+	end
 	if fireproximityprompt then local o=pr.RequiresLineOfSight;pr.RequiresLineOfSight=false;pr.MaxActivationDistance=50;fireproximityprompt(pr);pr.RequiresLineOfSight=o end
 	for _=1,20 do task.wait(0.1);if sf.Visible then break end end;if not sf.Visible then return end
 	local nn=sf:FindFirstChild("NpcInfo")and sf.NpcInfo:FindFirstChild("NpcName");local want=nn and nn.Text;if not want or want==""then return end
@@ -96,25 +113,25 @@ end
 local function doClean()
 	local c=LP.Character;local h=c and c:FindFirstChild("HumanoidRootPart");local hm=c and c:FindFirstChildWhichIsA("Humanoid");if not h or not hm or hm.Health<=0 then return end
 	local b=ob();if not b then return end;CPos=b:GetPivot().Position;local cs=b:FindFirstChild("CleaningSystem");if not cs then return end
-	-- Fix: collect ALL cleanable prompts, not just nearest, so one call clears the whole base
 	local toClean={}
 	for _,r in ipairs({cs:FindFirstChild("ActiveMesses"),cs:FindFirstChild("ActiveFires"),cs:FindFirstChild("Fires")})do
 		if r then for _,p in ipairs(r:GetDescendants())do if p:IsA("ProximityPrompt")and p.Enabled then local pt2=ct(p);if pt2 then local po=pp(p);if po and ib(po)then table.insert(toClean,{p=p,po=po,pt=pt2})end end end end end
 	end
 	if #toClean==0 then return end
-	local lastToolAttr=nil
+	local lastType=nil  -- track by tool TYPE (mess/glass), not by ra attribute value
 	local tool=nil
 	for _,be in ipairs(toClean)do
 		local pr,po,pt2=be.p,be.po,be.pt
 		if not pr.Enabled then continue end  -- might have been cleaned by a previous iteration
-		-- Re-equip only if tool type changed (avoids constant unequip/equip)
-		local ra=pr:GetAttribute("RequiredToolAttribute")
-		if ra~=lastToolAttr then
-			hm:UnequipTools();task.wait(0.05)
+		-- Re-equip only when tool TYPE changes (mess→glass), not on every prompt.
+		-- Using ra for this caused re-equips when ra varied between same-type prompts,
+		-- making pt() search Backpack for a broom that was already in Character → returned extinguisher.
+		if pt2~=lastType then
+			hm:UnequipTools();task.wait(0.2)
 			tool=pt(pr);if not tool then continue end
 			hm:EquipTool(tool)
-			for _=1,10 do if tool.Parent==c then break end;task.wait(0.06)end
-			lastToolAttr=ra
+			for _=1,15 do if tool.Parent==c then break end;task.wait(0.1)end
+			lastType=pt2
 		end
 		if not tool or tool.Parent~=c then continue end
 		-- Teleport next to the mess and face it
@@ -1791,35 +1808,61 @@ end)
 local BuyG, BuyP, BuyA = false, false, false
 -- Color variants White/Pink/Red require PC variant pass — not included. Buy base items only (free).
 -- Initial-B and Initial-P are separate stock IDs (free), not variants.
--- Sorted by star rating (highest first), then by price within the same star tier.
-local pcN={
-    -- ⭐⭐⭐⭐⭐ 5 Stars
-    "Vortessa","PinkDrift","Snowdrift","AvianoDesk","Dark Nexus",
-    "Initial-B","Initial-P","Sakura","AvianoChair","Polar X",
-    "GamingTable","Aether","HollowFrame","NexusChair","KittyChair",
-    "CyberCurve","ArcView","Overdrive","G-Force","Nightfall Keyboard",
-    "Spider-X Keyboard","Nocturne","Blossom Keyboard","Revv","Shadow",
-    -- ⭐⭐⭐⭐ 4 Stars
-    "Voltara","Hexora","Vesta","CleanDesk","SlimDesk",
-    "AngleView","V-View","Horizon","Fuji","Petal",
-    "Sora","[60 - Key ] Keyboard","Evergreen","OfficeChair",
-    -- ⭐⭐⭐ 3 Stars
-    "Throne","StoneChair","Galon","TriFan-Core","BlockView",
-    "Konoha","Kasumi","Wavy","Hanami","TriFan-Lite","[75 - Key ] Keyboard",
-    -- ⭐⭐ 2 Stars
-    "ShelfDesk","Midnight","BoxDesk","Azure","Ripple",
-    "RoundView","Hoshi","Japan","Nimbus","[80 - Key ] Keyboard",
-    "FlatCore","PulseCore","FoldingChair","Monoblock",
-    -- ⭐ 1 Star
-    "FrameDesk","Slate","WideView","[100 - Key ] Keyboard",
-    "OpenDesk","ClassicCore","Collage","WoodenChair",
+-- Sorted by PerHour (highest first) from SHOP_CONFIG.PcParts game data.
+local pcData={
+    {id="Vortessa",s=5},                                                                         -- 110/hr
+    {id="PinkDrift",s=5},{id="Snowdrift",s=5},                                                   -- 95/hr
+    {id="Dark Nexus",s=5},                                                                       -- 80/hr
+    {id="AvianoDesk",s=5},                                                                       -- 75/hr
+    {id="Sakura",s=5},                                                                           -- 65/hr
+    {id="Aether",s=5},{id="AvianoChair",s=5},{id="Initial-B",s=5},{id="Initial-P",s=5},         -- 60/hr
+    {id="Polar X",s=5},                                                                          -- 55/hr
+    {id="NexusChair",s=5},                                                                       -- 50/hr
+    {id="GamingTable",s=5},                                                                      -- 45/hr
+    {id="CyberCurve",s=5},{id="HollowFrame",s=5},{id="KittyChair",s=5},                         -- 40/hr
+    {id="ArcView",s=5},{id="Overdrive",s=5},{id="Voltara",s=4},                                  -- 35/hr
+    {id="Hexora",s=4},{id="Nightfall Keyboard",s=5},                                             -- 30/hr
+    {id="CleanDesk",s=4},{id="Spider-X Keyboard",s=5},{id="Throne",s=3},{id="Vesta",s=4},       -- 25/hr
+    {id="G-Force",s=5},                                                                          -- 22/hr
+    {id="AngleView",s=4},{id="Blossom Keyboard",s=5},{id="Galon",s=3},{id="SlimDesk",s=4},{id="StoneChair",s=3},{id="TriFan-Core",s=3}, -- 20/hr
+    {id="Nocturne",s=5},                                                                         -- 19/hr
+    {id="Revv",s=5},{id="V-View",s=4},                                                           -- 17/hr
+    {id="Shadow",s=5},                                                                           -- 16/hr
+    {id="Fuji",s=4},{id="Horizon",s=4},{id="OfficeChair",s=4},{id="ShelfDesk",s=2},{id="TriFan-Lite",s=3},{id="[60 - Key ] Keyboard",s=4}, -- 15/hr
+    {id="BlockView",s=3},{id="Petal",s=4},                                                       -- 14/hr
+    {id="Evergreen",s=4},{id="Sora",s=4},                                                        -- 13/hr
+    {id="Konoha",s=3},                                                                           -- 12/hr
+    {id="Kasumi",s=3},                                                                           -- 11/hr
+    {id="BoxDesk",s=2},{id="FlatCore",s=2},{id="FoldingChair",s=2},{id="Hanami",s=3},{id="Wavy",s=3},{id="[75 - Key ] Keyboard",s=3}, -- 10/hr
+    {id="Azure",s=2},{id="Midnight",s=2},                                                        -- 9/hr
+    {id="FrameDesk",s=1},{id="Hoshi",s=2},{id="PulseCore",s=2},{id="Ripple",s=2},{id="RoundView",s=2},{id="[80 - Key ] Keyboard",s=2}, -- 8/hr
+    {id="Japan",s=2},{id="Monoblock",s=2},                                                       -- 7/hr
+    {id="Nimbus",s=2},                                                                           -- 6/hr
+    {id="ClassicCore",s=1},{id="OpenDesk",s=1},{id="WideView",s=1},{id="WoodenChair",s=1},{id="[100 - Key ] Keyboard",s=1}, -- 5/hr
+    {id="Slate",s=1},                                                                            -- 4/hr
+    {id="Collage",s=1},                                                                          -- 3/hr
 }
+local pcN,pcIdMap={},{}
+for _,v in ipairs(pcData)do
+    local star=string.rep("⭐",v.s)
+    local disp=v.id.." "..star
+    table.insert(pcN,disp);pcIdMap[disp]=v.id
+end
 local grN={"Bcat","Beef Loaf","C5 Apol","C5 Klasik","C5 Limon","Cooking Oil","Lumpia","Mang Kanor","Pancit Kalamansi","Piyatos","Sayang","Toby","Water"}
 local accN={"Blorb","Car","Convertible","Cute Plushie","Kitty Plush","Oi Oi Oi","PineappleHouse","RedBullCar"}
-local ddP = st:AddDropdown({ Name="PC Parts", Multi=true, Options=pcN, Value={}, Key="PCItems", Callback=function(s)PCItems={};if type(s)=="table" then for _,n in ipairs(s)do PCItems[n]=true end elseif s then PCItems[s]=true end end })
+-- Declared here (before callbacks) so dropdown/button closures can reset per-selection
+local lastG, lastP = {}, {}
+local ddP = st:AddDropdown({ Name="PC Parts", Multi=true, Options=pcN, Value={}, Key="PCItems", Callback=function(s)PCItems={};if type(s)=="table" then for _,n in ipairs(s)do local id=pcIdMap[n]or n;PCItems[id]=true;lastP[id]=nil end elseif s then local id=pcIdMap[s]or s;PCItems[id]=true;lastP[id]=nil end end })
 local tbP = st:AddToggle({ Name="PC Parts Buy", Value=BuyP, Key="BuyP", Callback=function(v)BuyP=v end })
-st:AddButton({ Name="★ Select All Parts", Callback=function()
-	ddP:Set(pcN); PCItems={}; for _,n in ipairs(pcN) do PCItems[n]=true end
+local allPSel=false
+local selAllPBtn=st:AddButton({ Name="★ Select All Parts", Callback=function()
+	if not allPSel then
+		ddP:Set(pcN);PCItems={};lastP={};for _,v in ipairs(pcData)do PCItems[v.id]=true end
+		allPSel=true;selAllPBtn.Text="✖ Uncheck All Parts"
+	else
+		ddP:Set({});PCItems={}
+		allPSel=false;selAllPBtn.Text="★ Select All Parts"
+	end
 end })
 local ddG = st:AddDropdown({ Name="Grocery", Multi=true, Options=grN, Value={}, Key="GroceryItems", Callback=function(s)GroceryItems={};if type(s)=="table" then for _,n in ipairs(s)do GroceryItems[n]=true end elseif s then GroceryItems[s]=true end end })
 local tbG = st:AddToggle({ Name="Grocery Buy", Value=BuyG, Key="BuyG", Callback=function(v)BuyG=v end })
@@ -1930,7 +1973,6 @@ UI.Config:Init()
 -- Color variants (White/Pink/Red) removed — they all require PC variant pass (gamepass).
 -- G-Force, Overdrive, AvianoChair, AvianoDesk, Snowdrift, Vortessa bought as base items (free color).
 -- Initial-B and Initial-P are standalone stock IDs — no variant logic needed.
-local lastG, lastP = {}, {}
 local function doBuy()
 	local StockService = require(RS.Shared.Scripts.Packages.StockService)
 	local c=LP.Character;local h=c and c:FindFirstChild("HumanoidRootPart");if not h then return false end
@@ -1939,7 +1981,7 @@ local function doBuy()
 	if BuyG and type(gS)=="table" then for i,q in pairs(gS)do if type(q)=="number"and q>0 and GroceryItems[i]and(lastG[i]or 0)==0 then table.insert(bG,{i,q})end;lastG[i]=q end end
 	if BuyP and type(pS)=="table" then for i,q in pairs(pS)do if type(q)=="number"and q>0 and PCItems[i]and(lastP[i]or 0)==0 then table.insert(bP,{i,1})end;lastP[i]=q end end
 	local bA={}
-	if BuyA then for n in pairs(AccItems)do if not boughtAcc[n] then table.insert(bA,n) end end end
+	if BuyA then for n in pairs(AccItems)do table.insert(bA,n) end end
 	if #bG+#bP+#bA==0 then return false end
 	-- Parts first (priority 1), Grocery second (priority 2)
 	-- Fix: delay 0.1→0.5s between each purchase to avoid "Too fast" server rejection
@@ -1952,7 +1994,19 @@ local function doBuy()
 			local asp=nil;for _,pp in ipairs(r2:GetDescendants())do if pp:IsA("ProximityPrompt")and(pp.ObjectText or""):lower():match("accessor")then asp=pp;break end end
 			if asp and fireproximityprompt then local oL,oD=asp.RequiresLineOfSight,asp.MaxActivationDistance;asp.RequiresLineOfSight=false;asp.MaxActivationDistance=50;fireproximityprompt(asp);asp.RequiresLineOfSight=oL;asp.MaxActivationDistance=oD end
 			task.wait(0.6)
-			for _,n in ipairs(bA)do ASRQ:FireServer("Purchase",n);boughtAcc[n]=true;task.wait(0.7)end
+			-- Snipe: block until each item confirmed bought (server sends OnClientEvent back) or 10 attempts
+			for _,n in ipairs(bA)do
+				local confirmed=false
+				local c=ASRQ.OnClientEvent:Connect(function() confirmed=true end)
+				for _=1,10 do
+					ASRQ:FireServer("Purchase",n)
+					local t0=os.clock();while not confirmed and os.clock()-t0<1.5 do task.wait(0.1)end
+					if confirmed then break end
+					task.wait(0.3)
+				end
+				c:Disconnect()
+				task.wait(0.4)
+			end
 			task.wait(0.5)
 		end
 	end
@@ -2009,26 +2063,14 @@ local function printerPos()
 	return nil
 end
 local function doPrint()
-	local c=LP.Character;local h=c and c:FindFirstChild("HumanoidRootPart");if not h then return end
-	local pos=printerPos();if not pos then return end
+	PRQ:FireServer("Print")
 	printLastPoll=os.clock()
-	h.CFrame=CFrame.new(pos.X,pos.Y+3,pos.Z)
-	local pr=printerObj();local pp=nil
-	-- Fix: guard ob() before GetDescendants (same crash risk as printerPos)
-	if pr then local baseP=ob();if baseP then for _,p in ipairs(baseP:GetDescendants()) do if p:IsA("ProximityPrompt")and(p.ObjectText or""):lower():match("printer")then pp=p;break end end end end
-	if pp and fireproximityprompt then local oL,oD=pp.RequiresLineOfSight,pp.MaxActivationDistance;pp.RequiresLineOfSight=false;pp.MaxActivationDistance=50;fireproximityprompt(pp);pp.RequiresLineOfSight=oL;pp.MaxActivationDistance=oD end
-	local s=nil;local conn1=PRU.OnClientEvent:Connect(function(d)if type(d)=="table"and d.Paper~=nil then s=d end end)
-	local conn2=PRO.OnClientEvent:Connect(function(d)if type(d)=="table"and d.Paper~=nil then s=d end end)
-	for _=1,40 do task.wait(0.2);if s then break end end
-	if conn1 then pcall(function()conn1:Disconnect()end) end
-	if conn2 then pcall(function()conn2:Disconnect()end) end
+	local s=printState
 	if not s then return end
-	if s.Order and not s.Active then
-		PRQ:FireServer("Print")
-	end
 	local needInk=false;for _,n in ipairs(INKS)do local v=s.Inks and tonumber(s.Inks[n]) or 0;if v<20 then needInk=true end end
 	local paperNeed=(tonumber(s.Paper) or 0)<20
 	if needInk or paperNeed then
+		local c=LP.Character;local h=c and c:FindFirstChild("HumanoidRootPart");if not h then return end
 		local r2=workspace:FindFirstChild("Ren2")
 		if r2 then
 			h.CFrame=r2:GetPivot()*CFrame.new(0,2,5);task.wait(0.8)
@@ -2036,10 +2078,8 @@ local function doPrint()
 			if asp and fireproximityprompt then local oL,oD=asp.RequiresLineOfSight,asp.MaxActivationDistance;asp.RequiresLineOfSight=false;asp.MaxActivationDistance=50;fireproximityprompt(asp);asp.RequiresLineOfSight=oL;asp.MaxActivationDistance=oD end
 			task.wait(0.6)
 			if needInk then for _,n in ipairs(INKS)do ASRQ:FireServer("Purchase",n.." Ink");task.wait(0.7)end;task.wait(0.5)end
-			-- Fix: only buy packs needed to fill from current stock to capacity (was buying full capacity worth)
 			if paperNeed then local cap=s.PaperCapacity or 80;local cur=tonumber(s.Paper) or 0;local packs=math.max(1,math.ceil((cap-cur)/20));for _=1,packs do ASRQ:FireServer("Purchase","Copy Paper");task.wait(0.7)end end
 			task.wait(0.5)
-			h.CFrame=CFrame.new(pos.X,pos.Y+3,pos.Z)
 		end
 	end
 end
@@ -2098,29 +2138,17 @@ local function doPrintWork()
 	return false
 end
 local function doPayBills()
-	local c=LP.Character;local h=c and c:FindFirstChild("HumanoidRootPart");if not h then return end
-	EBR:FireServer("Snapshot")
-	local s=nil
-	local conn=EBS.OnClientEvent:Connect(function(d) s=d end)
-	local t0=os.clock();while not s and os.clock()-t0<3 do task.wait(0.2) end
-	if conn then pcall(function()conn:Disconnect()end) end
-	if s then billState=s end
-	if not s or not s.PayableBill or s.PayableBill<=0 then return end
-	local b=ob();if not b then return end
-	local ep=nil;for _,p in ipairs(b:GetDescendants())do if p:IsA("ProximityPrompt")and p:GetAttribute("ElectricityBillingOwnerUserId")==LP.UserId then ep=p;break end end
-	if not ep then return end
-	h.CFrame=CFrame.new(ep.Parent.Position.X,ep.Parent.Position.Y+3,ep.Parent.Position.Z);task.wait(0.6)
-	if fireproximityprompt then local oL,oD=ep.RequiresLineOfSight,ep.MaxActivationDistance;ep.RequiresLineOfSight=false;ep.MaxActivationDistance=50;fireproximityprompt(ep);ep.RequiresLineOfSight=oL;ep.MaxActivationDistance=oD end
-	task.wait(0.4)
-	EBR:FireServer("Pay")
-	task.wait(0.5)
+	for _=1,5 do
+		EBR:FireServer("Pay")
+		task.wait(0.5)
+	end
 end
 -- Dedicated bill loop: every 30s, pause the scheduler, pay the bill, resume.
 task.spawn(function()
 	while alive() do
 		task.wait(0.5)
 		if not AB or os.clock() < billNext then continue end
-		billNext = os.clock() + 30
+		billNext = os.clock() + 6
 		billBusy = true
 		pcall(doPayBills)
 		billBusy = false
