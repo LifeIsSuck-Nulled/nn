@@ -113,26 +113,25 @@ end
 local function doClean()
 	local c=LP.Character;local h=c and c:FindFirstChild("HumanoidRootPart");local hm=c and c:FindFirstChildWhichIsA("Humanoid");if not h or not hm or hm.Health<=0 then return end
 	local b=ob();if not b then return end;CPos=b:GetPivot().Position;local cs=b:FindFirstChild("CleaningSystem");if not cs then return end
-	-- doClean handles mess/glass only — fire is exclusively doFire's job.
-	-- Scanning ActiveFires/Fires here caused tool switching (broom→extinguisher) on Delta.
 	local toClean={}
-	for _,r in ipairs({cs:FindFirstChild("ActiveMesses")})do
-		if r then for _,p in ipairs(r:GetDescendants())do if p:IsA("ProximityPrompt")and p.Enabled then local pt2=ct(p);if pt2 and pt2~="fire" then local po=pp(p);if po and ib(po)then table.insert(toClean,{p=p,po=po,pt=pt2})end end end end end
+	for _,r in ipairs({cs:FindFirstChild("ActiveMesses"),cs:FindFirstChild("ActiveFires"),cs:FindFirstChild("Fires")})do
+		if r then for _,p in ipairs(r:GetDescendants())do if p:IsA("ProximityPrompt")and p.Enabled then local pt2=ct(p);if pt2 then local po=pp(p);if po and ib(po)then table.insert(toClean,{p=p,po=po,pt=pt2})end end end end end
 	end
 	if #toClean==0 then return end
-	local lastToolAttr=nil
+	local lastType=nil  -- track by tool TYPE (mess/glass), not by ra attribute value
 	local tool=nil
 	for _,be in ipairs(toClean)do
 		local pr,po,pt2=be.p,be.po,be.pt
 		if not pr.Enabled then continue end  -- might have been cleaned by a previous iteration
-		-- Re-equip only if tool type changed (avoids constant unequip/equip)
-		local ra=pr:GetAttribute("RequiredToolAttribute")
-		if ra~=lastToolAttr then
-			hm:UnequipTools();task.wait(0.2)  -- 0.2s gives Delta time to finish unequip
+		-- Re-equip only when tool TYPE changes (mess→glass), not on every prompt.
+		-- Using ra for this caused re-equips when ra varied between same-type prompts,
+		-- making pt() search Backpack for a broom that was already in Character → returned extinguisher.
+		if pt2~=lastType then
+			hm:UnequipTools();task.wait(0.2)
 			tool=pt(pr);if not tool then continue end
 			hm:EquipTool(tool)
-			for _=1,15 do if tool.Parent==c then break end;task.wait(0.1)end  -- up to 1.5s for slow executors
-			lastToolAttr=ra
+			for _=1,15 do if tool.Parent==c then break end;task.wait(0.1)end
+			lastType=pt2
 		end
 		if not tool or tool.Parent~=c then continue end
 		-- Teleport next to the mess and face it
@@ -2100,7 +2099,7 @@ end
 local function doCleanWork()
 	local b=ob();if not b then return false end
 	local cs=b:FindFirstChild("CleaningSystem");if not cs then return false end
-	for _,r in ipairs({cs:FindFirstChild("ActiveMesses")})do if r then for _,p in ipairs(r:GetDescendants())do local t2=ct(p);if p:IsA("ProximityPrompt")and p.Enabled and t2 and t2~="fire" then return true end end end end
+	for _,r in ipairs({cs:FindFirstChild("ActiveMesses"),cs:FindFirstChild("ActiveFires"),cs:FindFirstChild("Fires")})do if r then for _,p in ipairs(r:GetDescendants())do if p:IsA("ProximityPrompt")and p.Enabled and ct(p) then return true end end end end
 	return false
 end
 local function doChefWork()
