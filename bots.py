@@ -146,48 +146,52 @@ def _queue_cmd(code, cmd):
     with state_lock:
         state["cmds"][code] = cmd
 
-def _build_pc_embed(pc):
-    has_up = bool(pc.get("upgrades"))
-    embed = discord.Embed(
-        title=f"🖥️  PC {pc['num']}",
-        color=0x5B9CF6 if has_up else 0x57F287,
-    )
-    parts = [f"`{s['slot']}` — {s['name']} ({s['hr']}/hr)" for s in pc.get("parts", [])]
-    if parts:
-        embed.add_field(name="Currently Equipped", value="\n".join(parts), inline=False)
-    if has_up:
-        ups = [f"⬆️ `{u['slot']}` {u['from']} → **{u['to']}** (+{u['gain']}/hr)" for u in pc["upgrades"]]
-        embed.add_field(name="Recommended Upgrades", value="\n".join(ups), inline=False)
-        embed.add_field(name="Earnings After Upgrade",
-            value=f"{pc['current_hr']}/hr → **{pc['potential_hr']}/hr** (+{pc['gain']}/hr)", inline=False)
-    else:
-        embed.add_field(name="Status", value=f"✅ Already best — **{pc['current_hr']}/hr**", inline=False)
-    return embed
+def _pc_num(pc):
+    try:    return int(pc["num"])
+    except: return 0
 
-class UpgradeView(discord.ui.View):
-    def __init__(self, code, pc_num, has_upgrades):
+class AllPCsView(discord.ui.View):
+    """Single message view — one button per upgradeable PC + Upgrade All."""
+
+    def __init__(self, code, pcs):
         super().__init__(timeout=300)
-        self.code   = code
-        self.pc_num = pc_num
-        btn = discord.ui.Button(
-            label=f"⚙️ Upgrade PC {pc_num}",
-            style=discord.ButtonStyle.green if has_upgrades else discord.ButtonStyle.grey,
-            disabled=not has_upgrades,
-        )
-        btn.callback = self.on_click
-        self.add_item(btn)
+        self.code = code
+        upgradeable = [p for p in pcs if p.get("upgrades")]
 
-    async def on_click(self, interaction: discord.Interaction):
-        session = _get_session(self.code)
-        if not session:
-            await interaction.response.send_message("❌ Session expired. Re-run the executor.", ephemeral=True)
+        # One button per upgradeable PC (max 24 to leave room for Upgrade All)
+        for pc in upgradeable[:24]:
+            btn = discord.ui.Button(
+                label=f"⚙️ PC {pc['num']}",
+                style=discord.ButtonStyle.green,
+            )
+            btn.callback = self._make_cb(str(pc["num"]))
+            self.add_item(btn)
+
+        # Upgrade All
+        if upgradeable:
+            all_btn = discord.ui.Button(
+                label="⬆️ Upgrade All",
+                style=discord.ButtonStyle.blurple,
+                row=4,
+            )
+            all_btn.callback = self._upgrade_all
+            self.add_item(all_btn)
+
+    def _make_cb(self, pc_num):
+        async def cb(interaction: discord.Interaction):
+            if not _get_session(self.code):
+                await interaction.response.send_message("❌ Session expired.", ephemeral=True)
+                return
+            _queue_cmd(self.code, {"action": "customize", "pc": pc_num})
+            await interaction.response.send_message(f"⚙️ Upgrading **PC {pc_num}**...", ephemeral=True)
+        return cb
+
+    async def _upgrade_all(self, interaction: discord.Interaction):
+        if not _get_session(self.code):
+            await interaction.response.send_message("❌ Session expired.", ephemeral=True)
             return
-        pc = next((p for p in session["pcs"] if str(p["num"]) == str(self.pc_num)), None)
-        if not pc or not pc.get("upgrades"):
-            await interaction.response.send_message(f"✅ PC {self.pc_num} already at best!", ephemeral=True)
-            return
-        _queue_cmd(self.code, {"action": "customize", "pc": str(self.pc_num)})
-        await interaction.response.send_message(f"⚙️ Queued upgrade for **PC {self.pc_num}**...", ephemeral=True)
+        _queue_cmd(self.code, {"action": "customize_all"})
+        await interaction.response.send_message("⚙️ Upgrading all PCs...", ephemeral=True)
 
 # ── Commands ──────────────────────────────────────────────────────────────────
 
@@ -215,7 +219,7 @@ async def cmd_unlink(ctx):
 
 @bot.command(name="upgrades", aliases=["pcs", "status"])
 async def cmd_upgrades(ctx):
-    """Show your PCs with upgrade buttons."""
+    """Single message showing all PCs sorted by number, with upgrade buttons."""
     code = _get_code_for(ctx.author.id)
     if not code:
         await ctx.send("❌ Not linked yet. Run the executor script and use `!link <code>`.")
@@ -229,14 +233,30 @@ async def cmd_upgrades(ctx):
         await ctx.send("❌ No PC data yet. Wait a moment and try again.")
         return
 
-    upgradeable = sorted([p for p in pcs if p.get("upgrades")], key=lambda p: p.get("gain", 0), reverse=True)
-    maxed       = [p for p in pcs if not p.get("upgrades")]
+    # Sort by PC number ascending
+    sorted_pcs   = sorted(pcs, key=_pc_num)
+    upgradeable  = [p for p in sorted_pcs if p.get("upgrades")]
+    maxed        = [p for p in sorted_pcs if not p.get("upgrades")]
 
-    await ctx.send(f"📋 **{session['username']}'s PCs** — {len(upgradeable)} can upgrade, {len(maxed)} maxed out")
-    for pc in upgradeable + maxed:
-        embed = _build_pc_embed(pc)
-        view  = UpgradeView(code, str(pc["num"]), bool(pc.get("upgrades")))
-        await ctx.send(embed=embed, view=view)
+    embed = discord.Embed(
+        title=f"🖥️  {session['username']}'s PCs",
+        color=0x5B9CF6 if upgradeable else 0x57F287,
+        description=f"**{len(upgradeable)}** can upgrade  •  **{len(maxed)}** maxed",
+    )
+
+    for pc in sorted_pcs:
+        has_up = bool(pc.get("upgrades"))
+        if has_up:
+            ups = "  ".join(
+                f"`{u['slot']}` {u['from']} → **{u['to']}** (+{u['gain']}/hr)"
+                for u in pc["upgrades"]
+            )
+            val = f"⬆️  {pc['current_hr']}/hr → **{pc['potential_hr']}/hr** (+{pc['gain']}/hr)\n{ups}"
+        else:
+            val = f"✅  **{pc['current_hr']}/hr** — maxed"
+        embed.add_field(name=f"PC {pc['num']}", value=val, inline=False)
+
+    await ctx.send(embed=embed, view=AllPCsView(code, sorted_pcs))
 
 @bot.command(name="customize")
 async def cmd_customize(ctx, *, target: str = None):
