@@ -37,7 +37,7 @@ from flask import Flask, request as freq, jsonify
 import asyncio
 import time
 
-BOT_TOKEN  = "YOUR_BOT_TOKEN_HERE"   # ← paste your bot token here
+BOT_TOKEN = input("Enter bot token: ")   # ← paste your bot token here
 SECRET_KEY = "labahub_secret_123"     # ← change this, must match Lua script
 PORT       = 5000                     # Flask listens on this port
 
