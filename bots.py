@@ -10,11 +10,11 @@ Commands:
 
 Setup (Termux on cloud phone):
   pkg update && pkg upgrade
-  pkg install python
-  pip install discord.py flask pyngrok
+  pkg install python openssh
+  pip install discord.py flask
 
   Then just run:
-    python bot.py
+    python bots.py
   → It will print the public URL automatically. Paste it into BOT_URL in the Lua script.
 ────────────────────────────────────────────────────────────────
 """
@@ -26,18 +26,39 @@ import json
 from flask import Flask, request as freq, jsonify
 import asyncio
 import time
-from pyngrok import ngrok
+import subprocess
+import re
 
 BOT_TOKEN  = input("Enter bot token: ")   # ← type your token when prompted
 SECRET_KEY = "labahub_secret_123"     # ← change this, must match Lua script
 PORT       = 5000                     # Flask listens on this port
 
-# ── Auto-tunnel via ngrok (no second Termux session needed) ──────────────────
-public_url = ngrok.connect(PORT, "http").public_url
-print(f"\n{'='*60}")
-print(f"  PUBLIC URL (paste into BOT_URL in your Lua script):")
-print(f"  {public_url}")
-print(f"{'='*60}\n")
+# ── Auto-tunnel via serveo.net (works on Android/Termux) ─────────────────────
+_tunnel_url = None
+_tunnel_ready = threading.Event()
+
+def _run_tunnel():
+    global _tunnel_url
+    proc = subprocess.Popen(
+        ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ServerAliveInterval=30",
+         "-R", f"80:localhost:{PORT}", "serveo.net"],
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+    )
+    for line in proc.stdout:
+        m = re.search(r'https://\S+', line)
+        if m:
+            _tunnel_url = m.group().strip()
+            print(f"\n{'='*60}")
+            print(f"  PUBLIC URL — paste into BOT_URL in your Lua script:")
+            print(f"  {_tunnel_url}")
+            print(f"{'='*60}\n")
+            _tunnel_ready.set()
+
+threading.Thread(target=_run_tunnel, daemon=True).start()
+print("Waiting for tunnel...")
+_tunnel_ready.wait(timeout=30)
+if not _tunnel_url:
+    print("WARNING: Tunnel did not start in time. Check SSH / serveo.net connection.")
 
 # ── Shared state (Flask thread writes, Discord thread reads) ─────────────────
 state_lock = threading.Lock()
