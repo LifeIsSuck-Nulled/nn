@@ -19,6 +19,7 @@ local toggleBid = Auction:WaitForChild("ToggleBiddingUI")
 local toggleAuctionArea = Auction:WaitForChild("ToggleAuctionArea")
 local pickupEnd = Auction:WaitForChild("AuctionPickupEnd")
 local pickupStart = Auction:WaitForChild("AuctionPickupStart")
+local lostFoundOverride = Auction:WaitForChild("LostFoundOverride")
 local getNetWorth = Events.UI:WaitForChild("GetNetWorthBreakdown")
 local getInventory = Events.Inventory:WaitForChild("GetPlayerInventory")
 local transferToVehicle = Vehicles:WaitForChild("TransferInventoryItemToVehicle")
@@ -77,6 +78,8 @@ local state = {
 	autoLostFound = false, lostFoundRunning = false,
 	-- inventory cap
 	invCap = 10,
+	-- alien tier filter ({} = all tiers; filled = only those keys)
+	alienTierFilter = {},
 }
 local config = {
 	minBid = 0, minItemValue = 100, hitTolerance = 0.0075,
@@ -110,6 +113,9 @@ local config = {
 		["577"]=true,["578"]=true,["579"]=true,["580"]=true,["581"]=true,
 		["582"]=true,["583"]=true,["743"]=true,["753"]=true,["823"]=true,
 		["824"]=true,
+		["827"]=true,["828"]=true,
+		-- Alien vehicles
+		["881"]=true,["883"]=true,
 	},
 	shelfBlacklist = {
 		["357"]=true,["358"]=true,["359"]=true,["360"]=true,["361"]=true,
@@ -142,6 +148,9 @@ local config = {
 		["577"]=true,["578"]=true,["579"]=true,["580"]=true,["581"]=true,
 		["582"]=true,["583"]=true,["743"]=true,["753"]=true,["823"]=true,
 		["824"]=true,
+		["827"]=true,["828"]=true,
+		-- Alien vehicles
+		["881"]=true,["883"]=true,
 	}
 }
 local trophyMutBlacklist = {}
@@ -150,15 +159,16 @@ local trophyMutations = {
 	"Chrome","Gem","Diamond","Corrupted","Gold",
 	"Silver","Huge","Tiny",
 }
-local areaOptions = { "JunkYard", "BackAlley", "Farmyard", "Shipyard", "LuckyBeach", "PowerPlant" }
+local areaOptions = { "JunkYard", "BackAlley", "Farmyard", "Shipyard", "LuckyBeach", "PowerPlant", "AlienInvasion" }
 state.selected["JunkYard"] = true
 local areaGameNames = {
-	JunkYard    = "Junk Yard",
-	BackAlley   = "Back Alley",
-	Farmyard    = "Farmyard",
-	Shipyard    = "Shipyard",
-	LuckyBeach  = "Lucky Beach",
-	PowerPlant  = "Power Plant",
+	JunkYard      = "Junk Yard",
+	BackAlley     = "Back Alley",
+	Farmyard      = "Farmyard",
+	Shipyard      = "Shipyard",
+	LuckyBeach    = "Lucky Beach",
+	PowerPlant    = "Power Plant",
+	AlienInvasion = "Alien Invasion",
 }
 
 -- Anti-AFK debug helpers (kept intentionally)
@@ -167,47 +177,76 @@ local wdbg = function(msg) warn("[SH] "  .. tostring(msg)) end
 
 -- ══════════════════════════════════════════════════════════════
 -- ANTI-AFK
--- How the game kicks you: IdleRejoin LocalScript watches
---   UserInputService.InputEnded and fires IdleTeleport:FireServer()
---   after 900s (15 min) of no input. The server then rejoins you.
--- Fix: hook __namecall and silently drop FireServer on that remote.
---   Works on Delta (mobile) and Real (PC). No VirtualInputManager needed.
+-- Two separate kick systems to block:
+--
+-- 1. GAME KICK (15 min): IdleRejoin LocalScript fires IdleTeleport:FireServer()
+--    Fix: hook __namecall and silently drop that FireServer call.
+--
+-- 2. ROBLOX KICK (20 min, Error 278): Roblox's own engine-level idle disconnect.
+--    Fix: connect to player.Idled and simulate activity to reset the timer.
+--    Works on Delta (mobile) and Real (PC).
 -- ══════════════════════════════════════════════════════════════
 local _antiAfkHookRestorer = nil  -- stores how to undo the hook on cleanup
+local _antiAfkIdledConn = nil     -- stores the Idled connection for cleanup
 
 local function installAntiAfk()
+	-- ── Part 1: block game's IdleTeleport:FireServer() ──────────
 	local Misc = Events:WaitForChild("Misc", 10)
 	local idleRemote = Misc and Misc:WaitForChild("IdleTeleport", 10)
 	if not idleRemote then
-		wdbg("antiAfk: IdleTeleport remote not found — anti-AFK not installed")
-		return
+		wdbg("antiAfk: IdleTeleport remote not found — game kick protection not installed")
+	else
+		local ok, err = pcall(function()
+			local mt = getrawmetatable(game)
+			local oldNamecall = mt.__namecall
+			setreadonly(mt, false)
+			mt.__namecall = newcclosure(function(self, ...)
+				if self == idleRemote and getnamecallmethod() == "FireServer" then
+					dbg("antiAfk: blocked IdleTeleport:FireServer() — game kick prevented")
+					return  -- drop it silently, server never sees it
+				end
+				return oldNamecall(self, ...)
+			end)
+			setreadonly(mt, true)
+			_antiAfkHookRestorer = function()
+				pcall(function()
+					local mt2 = getrawmetatable(game)
+					setreadonly(mt2, false)
+					mt2.__namecall = oldNamecall
+					setreadonly(mt2, true)
+				end)
+			end
+			dbg("antiAfk: game kick hook installed (IdleTeleport:FireServer blocked)")
+		end)
+		if not ok then
+			wdbg("antiAfk: game kick hook failed (" .. tostring(err) .. ")")
+		end
 	end
 
-	local ok, err = pcall(function()
-		local mt = getrawmetatable(game)
-		local oldNamecall = mt.__namecall
-		setreadonly(mt, false)
-		mt.__namecall = newcclosure(function(self, ...)
-			if self == idleRemote and getnamecallmethod() == "FireServer" then
-				dbg("antiAfk: blocked IdleTeleport:FireServer() — you won't be kicked")
-				return  -- drop it silently, server never sees it
-			end
-			return oldNamecall(self, ...)
-		end)
-		setreadonly(mt, true)
-		-- store restorer so cleanup() can undo the hook
-		_antiAfkHookRestorer = function()
+	-- ── Part 2: block Roblox's own 20-min idle kick (Error 278) ─
+	-- player.Idled fires when Roblox considers you idle.
+	-- Responding with any activity resets the engine's idle timer.
+	local ok2, err2 = pcall(function()
+		_antiAfkIdledConn = player.Idled:Connect(function()
+			dbg("antiAfk: Roblox idle event fired — resetting (Error 278 prevention)")
+			-- Try VirtualInputManager first (PC/Real)
 			pcall(function()
-				local mt2 = getrawmetatable(game)
-				setreadonly(mt2, false)
-				mt2.__namecall = oldNamecall
-				setreadonly(mt2, true)
+				local VU = game:GetService("VirtualUser")
+				VU:CaptureController()
+				VU:ClickButton2(Vector2.new())
 			end)
-		end
-		dbg("antiAfk: installed — IdleTeleport:FireServer() is now blocked (game kicks at 15 min idle)")
+			-- Fallback: character jump (works on Delta/mobile too)
+			pcall(function()
+				local char = player.Character
+				local hum = char and char:FindFirstChildOfClass("Humanoid")
+				if hum and hum.Health > 0 then hum.Jump = true end
+			end)
+		end)
 	end)
-	if not ok then
-		wdbg("antiAfk: hook failed (" .. tostring(err) .. ") — you may still get kicked after 15 min")
+	if ok2 then
+		dbg("antiAfk: Roblox idle kick protection installed (Error 278 blocked)")
+	else
+		wdbg("antiAfk: Roblox idle protection failed (" .. tostring(err2) .. ")")
 	end
 end
 
@@ -221,8 +260,9 @@ local function connect(s, cb) local c = s:Connect(cb); table.insert(connections,
 local function cleanup()
 	alive = false
 	for _, c in ipairs(connections) do pcall(function() c:Disconnect() end) end
-	-- restore __namecall hook if we installed one
+	-- restore __namecall hook and disconnect Roblox idle listener
 	if _antiAfkHookRestorer then pcall(_antiAfkHookRestorer); _antiAfkHookRestorer = nil end
+	if _antiAfkIdledConn then pcall(function() _antiAfkIdledConn:Disconnect() end); _antiAfkIdledConn = nil end
 	local ui = playerGui:FindFirstChild("SH_ControlUI"); if ui then ui:Destroy() end
 	getgenv().SH_SetFarm = nil; getgenv().SH_State = nil
 	_G.SH_HelperCleanup = nil
@@ -292,25 +332,36 @@ local function scanGarages()
 			local raw = string.match(t, "%$([%d,]+)")
 			local req = raw and tonumber((raw:gsub("[^%d]", ""))) or 0
 			if req <= nw then
-				table.insert(r, { instance = g, name = g.Name, area = normalizeArea(g:GetAttribute("AreaName")), zone = z })
+				table.insert(r, { instance = g, name = g.Name, area = normalizeArea(g:GetAttribute("AreaName")), zone = z, req = req })
 			end
 		end
 	end
+	-- Highest-tier garages first so we always target the most valuable ones
+	table.sort(r, function(a, b) return a.req > b.req end)
 	state.garages = r; state.lastScan = os.clock()
 	return #r
 end
 local function selectedGarage(idx)
 	local n = #state.garages; if n == 0 then return nil, nil end
-	for step = 1, n do
-		local ni = ((idx + step - 1) % n) + 1; local g = state.garages[ni]
-		if state.selected[g.area] then
+	local function tierOk(g)
+		if g.area == "AlienInvasion" and next(state.alienTierFilter) then
+			return state.alienTierFilter[g.instance.Name] == true
+		end
+		return true
+	end
+	-- List is sorted by req desc so index 1 = highest tier.
+	-- Always try highest-tier first (active prompt preferred).
+	for i = 1, n do
+		local g = state.garages[i]
+		if state.selected[g.area] and tierOk(g) then
 			local p = g.instance:FindFirstChild("EnterAuction", true)
-			if p and p:IsA("ProximityPrompt") and p.Enabled then return ni, g end
+			if p and p:IsA("ProximityPrompt") and p.Enabled then return i, g end
 		end
 	end
-	for step = 1, n do
-		local ni = ((idx + step - 1) % n) + 1; local g = state.garages[ni]
-		if state.selected[g.area] then return ni, g end
+	-- No active prompts — still go to highest-tier selected garage
+	for i = 1, n do
+		local g = state.garages[i]
+		if state.selected[g.area] and tierOk(g) then return i, g end
 	end
 	return nil, nil
 end
@@ -383,7 +434,7 @@ end
 -- ── FARM STEP ────────────────────────────────────────────────
 local function farmStep()
 	if not alive or not state.master or not state.farm then return end
-	if #state.garages == 0 or os.clock() - state.lastScan >= 10 then scanGarages() end
+	if #state.garages == 0 or os.clock() - state.lastScan >= 2 then scanGarages() end
 	if tryBid() then return end
 	if state.won then return end
 	if state.collecting then return end
@@ -450,6 +501,18 @@ collectWonItems = function()
 			if not garage then
 				state.won = false; state.wonGarage = nil; state.collecting = false; return
 			end
+			-- Get garage center so we only pick up items near the won garage,
+			-- not Lost & Found items scattered across the map
+			local garagePos
+			pcall(function()
+				local z = garage:FindFirstChild("AuctionZone", true)
+				garagePos = z and z.Position
+				if not garagePos then
+					local bp = garage.PrimaryPart or garage:FindFirstChildWhichIsA("BasePart", true)
+					garagePos = bp and bp.Position
+				end
+			end)
+			local PICKUP_RADIUS = 220
 			state.overweightSignal = false
 			state.vehicleFarSignal = false
 			state.beforeInventory = {}
@@ -500,7 +563,9 @@ collectWonItems = function()
 							local d2 = Items[idStr] or Items[tonumber(idStr)]
 							local value = getRealValue(entry)
 							local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
-							table.insert(candidates, { prompt = pp, part = part, entry = entry, value = value, idStr = idStr, itemName = d2 and d2.Name or "" })
+							if not garagePos or not part or (part.Position - garagePos).Magnitude <= PICKUP_RADIUS then
+								table.insert(candidates, { prompt = pp, part = part, entry = entry, value = value, idStr = idStr, itemName = d2 and d2.Name or "" })
+							end
 						end
 					end
 				end
@@ -563,10 +628,11 @@ collectWonItems = function()
 							local d2 = Items[idStr] or Items[tonumber(idStr)]
 							local whitelisted = config.whitelist[idStr] or (d2 and config.whitelist[d2.Name])
 							local value = getRealValue(entry)
-							if not (config.minItemValue > 0 and value < config.minItemValue and not whitelisted) then
+							local dcp = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+							if not (config.minItemValue > 0 and value < config.minItemValue and not whitelisted)
+								and (not garagePos or not dcp or (dcp.Position - garagePos).Magnitude <= PICKUP_RADIUS) then
 								local root = rootPart()
-								local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
-								if root and part then exitVehicle(); root.CFrame = part.CFrame + Vector3.new(0,2,0); task.wait(0.1) end
+								if root and dcp then exitVehicle(); root.CFrame = dcp.CFrame + Vector3.new(0,2,0); task.wait(0.1) end
 								triggerPrompt(pp); collected = collected + 1; task.wait(0.4)
 							end
 						end
@@ -763,15 +829,20 @@ doUnloadAndStock = function()
 end
 
 -- ── LOST AND FOUND ───────────────────────────────────────────
-local function doLostAndFound()
+local function doLostAndFound(overrideArea)
 	if state.lostFoundRunning then return end
 	state.lostFoundRunning = true
-	local areaKey = nil
-	for _, key in ipairs(areaOptions) do
-		if state.selected[key] then areaKey = key; break end
+	local gameName
+	if overrideArea then
+		gameName = overrideArea
+	else
+		local areaKey = nil
+		for _, key in ipairs(areaOptions) do
+			if state.selected[key] then areaKey = key; break end
+		end
+		if not areaKey then state.lostFoundRunning = false; return end
+		gameName = areaGameNames[areaKey]
 	end
-	if not areaKey then state.lostFoundRunning = false; return end
-	local gameName = areaGameNames[areaKey]
 	if not gameName then state.lostFoundRunning = false; return end
 	local ok, result = pcall(function() return getLostItems:InvokeServer(gameName) end)
 	if not ok or type(result) ~= "table" or type(result.items) ~= "table" then
@@ -1070,11 +1141,19 @@ local afkLbl = lbl("Anti-AFK: installing...", pages[1], 8, 124)
 afkLbl.TextColor3 = Color3.fromRGB(100, 180, 255)
 task.spawn(function()
 	task.wait(3)
-	if _antiAfkHookRestorer then
-		afkLbl.Text = "Anti-AFK: ON ✓ (IdleTeleport blocked)"
+	local gameOk = _antiAfkHookRestorer ~= nil
+	local robloxOk = _antiAfkIdledConn ~= nil
+	if gameOk and robloxOk then
+		afkLbl.Text = "Anti-AFK: ON ✓ (game 15min + Roblox 20min blocked)"
 		afkLbl.TextColor3 = Color3.fromRGB(80, 220, 130)
+	elseif robloxOk then
+		afkLbl.Text = "Anti-AFK: partial — Roblox kick blocked, game kick FAILED"
+		afkLbl.TextColor3 = Color3.fromRGB(220, 180, 60)
+	elseif gameOk then
+		afkLbl.Text = "Anti-AFK: partial — game kick blocked, Roblox kick FAILED"
+		afkLbl.TextColor3 = Color3.fromRGB(220, 180, 60)
 	else
-		afkLbl.Text = "Anti-AFK: FAILED — may get kicked after 15 min"
+		afkLbl.Text = "Anti-AFK: FAILED — may get kicked"
 		afkLbl.TextColor3 = Color3.fromRGB(220, 80, 80)
 	end
 end)
@@ -1151,8 +1230,10 @@ local areaDisplay = {
 	{key="JunkYard",lbl="Junk Yard"},{key="BackAlley",lbl="Back Alley"},
 	{key="Farmyard",lbl="Farmyard"},{key="Shipyard",lbl="Shipyard"},
 	{key="LuckyBeach",lbl="Lucky Beach"},{key="PowerPlant",lbl="Power Plant"},
+	{key="AlienInvasion",lbl="Alien Invasion"},
 }
 local areaBtns = {}
+local alienTierFrame  -- assigned after loop; closures reference it by upvalue
 for i, a in ipairs(areaDisplay) do
 	local x = 8+((i-1)%2)*222; local y = 176+math.floor((i-1)/2)*32
 	local isSelected = state.selected[a.key]
@@ -1166,6 +1247,58 @@ for i, a in ipairs(areaDisplay) do
 		state.selected[a.key] = true
 		b.Text = "[•] "..a.lbl
 		state.target = nil
+		if alienTierFrame then alienTierFrame.Visible = (a.key == "AlienInvasion") end
+	end)
+end
+-- ── Alien Invasion tier sub-selector ─────────────────────────
+-- Appears below the area buttons only when Alien Invasion is selected.
+local alienTierBtnList = {}
+local alienTierDefs = {
+	{key=nil,              lbl="All"},
+	{key="Alien Garage 1", lbl="G1 ($2K)"},
+	{key="Alien Garage 2", lbl="G2 ($20K)"},
+	{key="Alien Garage 3", lbl="G3 ($250K)"},
+	{key="Alien Garage 4", lbl="Garage 4"},
+}
+alienTierFrame = Instance.new("Frame", pages[2])
+alienTierFrame.Position = UDim2.fromOffset(8, 306)
+alienTierFrame.Size = UDim2.fromOffset(440, 28)
+alienTierFrame.BackgroundTransparency = 1
+alienTierFrame.Visible = false
+local function updateAlienTierBtns()
+	local hasFilter = next(state.alienTierFilter) ~= nil
+	for j, tb in ipairs(alienTierBtnList) do
+		local t = alienTierDefs[j]
+		local active = (t.key == nil and not hasFilter)
+			or (t.key ~= nil and state.alienTierFilter[t.key] == true)
+		tb.Text = (active and "[•] " or "[ ] ")..t.lbl
+		tb.BackgroundColor3 = active
+			and Color3.fromRGB(30,70,50)
+			or  Color3.fromRGB(30,40,50)
+	end
+end
+for i, t in ipairs(alienTierDefs) do
+	local b = Instance.new("TextButton", alienTierFrame)
+	b.Position = UDim2.fromOffset((i-1)*88, 0)
+	b.Size = UDim2.fromOffset(84, 28)
+	b.BackgroundColor3 = i==1 and Color3.fromRGB(30,70,50) or Color3.fromRGB(30,40,50)
+	b.BorderSizePixel = 0
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 10
+	b.TextColor3 = Color3.fromRGB(235, 245, 250)
+	b.Text = (i==1 and "[•] " or "[ ] ")..t.lbl
+	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+	alienTierBtnList[i] = b
+	connect(b.MouseButton1Click, function()
+		if t.key == nil then
+			state.alienTierFilter = {}       -- "All" clears the filter
+		elseif state.alienTierFilter[t.key] then
+			state.alienTierFilter[t.key] = nil  -- deselect
+		else
+			state.alienTierFilter[t.key] = true -- select
+		end
+		state.target = nil
+		updateAlienTierBtns()
 	end)
 end
 local drinkIds = {"359","360","361"}; local diamondIds = {"357","358"}
@@ -1175,8 +1308,8 @@ local function updateWhitelistLabel()
 	local ids={}; for k in pairs(config.whitelist) do table.insert(ids,k) end
 	table.sort(ids); whitelistLbl.Text=#ids>0 and table.concat(ids,", ") or "(none)"
 end
-local drinkBtn   = btn("[ ] Always pickup: Drinks",   pages[2], 8,   282, 210)
-local diamondBtn = btn("[ ] Always pickup: Diamonds", pages[2], 226, 282, 224)
+local drinkBtn   = btn("[ ] Always pickup: Drinks",   pages[2], 8,   346, 210)
+local diamondBtn = btn("[ ] Always pickup: Diamonds", pages[2], 226, 346, 224)
 local drinkOn, diamondOn = false, false
 connect(drinkBtn.MouseButton1Click, function()
 	drinkOn=not drinkOn; drinkBtn.Text=(drinkOn and "[x]" or "[ ]").." Always pickup: Drinks"
@@ -1188,18 +1321,18 @@ connect(diamondBtn.MouseButton1Click, function()
 	for _,id in ipairs(diamondIds) do if diamondOn then config.whitelist[id]=true else config.whitelist[id]=nil end end
 	updateWhitelistLabel()
 end)
-lbl("Pickup Whitelist (bypass min value filter):", pages[2], 8, 318)
-whitelistLbl = lbl("376, 562, 635, 735, 764", pages[2], 8, 334)
+lbl("Pickup Whitelist (bypass min value filter):", pages[2], 8, 382)
+whitelistLbl = lbl("376, 562, 635, 735, 764", pages[2], 8, 398)
 whitelistLbl.TextColor3 = Color3.fromRGB(100,220,165)
-local whiteBox = inp("", pages[2], 8, 352, 270); whiteBox.PlaceholderText="Item ID or name..."
-local whiteAddBtn = btn("Add", pages[2], 286, 352, 60)
-local whiteClrBtn = btn("Clear", pages[2], 354, 352, 96)
+local whiteBox = inp("", pages[2], 8, 416, 270); whiteBox.PlaceholderText="Item ID or name..."
+local whiteAddBtn = btn("Add", pages[2], 286, 416, 60)
+local whiteClrBtn = btn("Clear", pages[2], 354, 416, 96)
 connect(whiteAddBtn.MouseButton1Click, function()
 	local id=whiteBox.Text:match("^%s*(.-)%s*$")
 	if id~="" then config.whitelist[id]=true; updateWhitelistLabel() end; whiteBox.Text=""
 end)
 connect(whiteClrBtn.MouseButton1Click, function() config.whitelist={}; updateWhitelistLabel() end)
-local lnfBtn = btn("[ ] Lost & Found Auto-Claim: OFF", pages[2], 8, 390, 434)
+local lnfBtn = btn("[ ] Lost & Found Auto-Claim: OFF", pages[2], 8, 454, 434)
 connect(lnfBtn.MouseButton1Click, function()
 	state.autoLostFound = not state.autoLostFound
 	lnfBtn.Text = (state.autoLostFound and "[•] " or "[ ] ").."Lost & Found Auto-Claim: "..(state.autoLostFound and "ON" or "OFF")
@@ -1207,15 +1340,19 @@ connect(lnfBtn.MouseButton1Click, function()
 end)
 -- PAGE 3: TELEPORT
 local tpEntries = {
-	{"Junk Yard",Vector3.new(19.9,1721.7,-24.3)},{"Back Alley",Vector3.new(-571.2,1721.3,-400)},
-	{"Farmyard",Vector3.new(-78.5,1721.6,-1148)},{"Shipyard",Vector3.new(-551,1721.4,698)},
-	{"Lucky Beach",Vector3.new(-222.6,1688.8,-1784.8)},{"Power Plant",Vector3.new(-2115.6,1721.1,-955.8)},
+	{"Junk Yard",     Vector3.new(19.9,1721.7,-24.3)},   {"Back Alley",    Vector3.new(-571.2,1721.3,-400)},
+	{"Farmyard",      Vector3.new(-78.5,1721.6,-1148)},   {"Shipyard",      Vector3.new(-551,1721.4,698)},
+	{"Lucky Beach",   Vector3.new(-222.6,1688.8,-1784.8)},{"Power Plant",   Vector3.new(-2115.6,1721.1,-955.8)},
+	{"Alien Invasion",Vector3.new(-263,1722,-788)},        {"Grading",       Vector3.new(335.6,1722,-315.2)},
+	{"Item Cleaning", Vector3.new(461.6,1722,-279.9)},     {"Repair Shop",   Vector3.new(465.3,1722,-80.1)},
+	{"Locksmith",     Vector3.new(395.0,1722,-16.6)},      {"Quick Sell",    Vector3.new(363.4,1722,-46.5)},
+	{"Energy Cafe",   Vector3.new(349.3,1722,-21.1)},
 }
 for i, e in ipairs(tpEntries) do
 	local b = btn(e[1], pages[3], 8+((i-1)%2)*224, 8+math.floor((i-1)/2)*34, 212)
 	connect(b.MouseButton1Click, function() teleportPlayer(CFrame.new(e[2])) end)
 end
-connect(btn("My Base", pages[3], 8, 116, 212).MouseButton1Click, function()
+connect(btn("My Base", pages[3], 8, 246, 212).MouseButton1Click, function()
 	teleportPlayer(CFrame.new(ownBase+Vector3.new(0,3,0)))
 end)
 -- PAGE 4: UNLOAD
@@ -1396,6 +1533,13 @@ connect(pickupEnd.OnClientEvent, function()
 	if not state.collecting then state.won=false end
 	setStatus("Pickup ended")
 end)
+connect(lostFoundOverride.OnClientEvent, function(data)
+	if type(data) ~= "table" then return end
+	local area = type(data.area) == "string" and data.area or nil
+	if not area then return end
+	setStatus("L&F alert: " .. area .. " — auto-collecting...")
+	task.spawn(function() doLostAndFound(area) end)
+end)
 connect(pickupStart.OnClientEvent, function()
 	finalizeWin()
 end)
@@ -1449,4 +1593,4 @@ getgenv().SH_State = state
 -- INIT
 -- ══════════════════════════════════════════════════════════════
 scanGarages(); refreshUi()
-print("[SH v8.2] Loaded — Anti-AFK active")
+print("[SH v8.2] Loaded — Anti-AFK active (game 15min + Roblox 20min/Error 278)")
