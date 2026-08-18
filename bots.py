@@ -11,21 +11,11 @@ Commands:
 Setup (Termux on cloud phone):
   pkg update && pkg upgrade
   pkg install python
-  pip install discord.py flask
+  pip install discord.py flask pyngrok
 
-  Then in a SECOND Termux session, expose port 5000:
-    Option A (easiest, no install):
-      ssh -R 80:localhost:5000 serveo.net
-      → copy the URL it gives, e.g. https://abc123.serveo.net
-
-    Option B (ngrok):
-      pkg install tsu && su -c "pkg install ngrok"
-      ngrok http 5000
-      → copy the https://xxxx.ngrok-free.app URL
-
-  Paste that URL into BOT_URL in laba_bridge.lua (no trailing slash).
-
-  Set BOT_TOKEN and SECRET_KEY below, then: python bot.py
+  Then just run:
+    python bot.py
+  → It will print the public URL automatically. Paste it into BOT_URL in the Lua script.
 ────────────────────────────────────────────────────────────────
 """
 
@@ -36,10 +26,18 @@ import json
 from flask import Flask, request as freq, jsonify
 import asyncio
 import time
+from pyngrok import ngrok
 
 BOT_TOKEN  = input("Enter bot token: ")   # ← type your token when prompted
 SECRET_KEY = "labahub_secret_123"     # ← change this, must match Lua script
 PORT       = 5000                     # Flask listens on this port
+
+# ── Auto-tunnel via ngrok (no second Termux session needed) ──────────────────
+public_url = ngrok.connect(PORT, "http").public_url
+print(f"\n{'='*60}")
+print(f"  PUBLIC URL (paste into BOT_URL in your Lua script):")
+print(f"  {public_url}")
+print(f"{'='*60}\n")
 
 # ── Shared state (Flask thread writes, Discord thread reads) ─────────────────
 state_lock = threading.Lock()
