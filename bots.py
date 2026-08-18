@@ -118,53 +118,6 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-def _pc_embed(pcs: list) -> discord.Embed:
-    """Build the upgrade report embed from PC list."""
-    can_upgrade = [p for p in pcs if p.get("upgrades")]
-    maxed_out   = [p for p in pcs if not p.get("upgrades")]
-
-    # Sort upgradeable by gain descending
-    can_upgrade.sort(key=lambda p: p.get("gain", 0), reverse=True)
-
-    embed = discord.Embed(
-        title="🖥️  PC Upgrade Report",
-        color=0x5B9CF6,
-    )
-
-    if can_upgrade:
-        lines = []
-        for pc in can_upgrade:
-            num  = pc["num"]
-            cur  = pc["current_hr"]
-            pot  = pc["potential_hr"]
-            gain = pc["gain"]
-            parts = "  |  ".join(
-                f"{u['slot']}: {u['from']} → **{u['to']}** (+{u['gain']}/hr)"
-                for u in pc["upgrades"]
-            )
-            lines.append(
-                f"**PC {num}** — {cur}/hr → **{pot}/hr** (+{gain}/hr)\n"
-                f"┗ {parts}"
-            )
-        embed.add_field(
-            name=f"⬆️  Can Be Upgraded ({len(can_upgrade)} PCs)",
-            value="\n\n".join(lines),
-            inline=False,
-        )
-
-    if maxed_out:
-        nums = "  ".join(f"PC {p['num']}" for p in maxed_out)
-        embed.add_field(
-            name=f"✅  Already Best ({len(maxed_out)} PCs)",
-            value=nums,
-            inline=False,
-        )
-
-    total_gain = sum(p.get("gain", 0) for p in pcs)
-    embed.set_footer(text=f"Total potential gain: +{total_gain}/hr  •  !customize <num> to apply")
-    return embed
-
-
 def _queue_cmd(cmd: dict):
     with state_lock:
         state["pending_cmd"] = cmd
@@ -180,20 +133,91 @@ def _get_pcs():
         return list(state["pcs"])
 
 
+def _build_pc_embed(pc: dict) -> discord.Embed:
+    """Build a single-PC embed showing current parts + recommended upgrades."""
+    has_upgrades = bool(pc.get("upgrades"))
+    color = 0x5B9CF6 if has_upgrades else 0x57F287
+
+    embed = discord.Embed(
+        title=f"🖥️  PC {pc['num']}",
+        color=color,
+    )
+
+    # Current parts
+    parts_lines = [f"`{s['slot']}` — {s['name']} ({s['hr']}/hr)" for s in pc.get("parts", [])]
+    if parts_lines:
+        embed.add_field(name="Currently Equipped", value="\n".join(parts_lines), inline=False)
+
+    # Recommended upgrades from inventory
+    if has_upgrades:
+        up_lines = [
+            f"⬆️ `{u['slot']}` {u['from']} → **{u['to']}** (+{u['gain']}/hr)"
+            for u in pc["upgrades"]
+        ]
+        embed.add_field(name="Recommended Upgrades", value="\n".join(up_lines), inline=False)
+        embed.add_field(
+            name="Earnings After Upgrade",
+            value=f"{pc['current_hr']}/hr → **{pc['potential_hr']}/hr** (+{pc['gain']}/hr)",
+            inline=False,
+        )
+    else:
+        embed.add_field(name="Status", value=f"✅ Already best — **{pc['current_hr']}/hr**", inline=False)
+
+    return embed
+
+
+class UpgradeView(discord.ui.View):
+    """Upgrade button attached to each PC embed."""
+    def __init__(self, pc_num: str, has_upgrades: bool):
+        super().__init__(timeout=300)
+        self.pc_num = pc_num
+
+        btn = discord.ui.Button(
+            label=f"⚙️ Upgrade PC {pc_num}",
+            style=discord.ButtonStyle.green if has_upgrades else discord.ButtonStyle.grey,
+            disabled=not has_upgrades,
+            custom_id=f"upgrade_{pc_num}",
+        )
+        btn.callback = self.upgrade_callback
+        self.add_item(btn)
+
+    async def upgrade_callback(self, interaction: discord.Interaction):
+        pc = _get_pc(self.pc_num)
+        if not pc:
+            await interaction.response.send_message(f"❌ PC {self.pc_num} not found.", ephemeral=True)
+            return
+        if not pc.get("upgrades"):
+            await interaction.response.send_message(f"✅ PC {self.pc_num} is already at best!", ephemeral=True)
+            return
+        _queue_cmd({"action": "customize", "pc": str(self.pc_num)})
+        await interaction.response.send_message(
+            f"⚙️ Queued upgrade for **PC {self.pc_num}** — applying in ~3s...", ephemeral=True
+        )
+
+
 # ── Commands ──────────────────────────────────────────────────────────────────
 
 @bot.command(name="upgrades", aliases=["pcs", "status"])
 async def cmd_upgrades(ctx):
-    """Show all PCs and their possible upgrades."""
+    """Show each PC as its own message with an Upgrade button."""
     pcs = _get_pcs()
     if not pcs:
         await ctx.send(
             "❌ No data received yet.\n"
-            "Make sure your Roblox executor is running and `laba_bridge.lua` is loaded."
+            "Make sure your Roblox executor is running and the Lua script is loaded."
         )
         return
-    embed = _pc_embed(pcs)
-    await ctx.send(embed=embed)
+
+    # Sort: upgradeable first (by gain desc), then maxed
+    upgradeable = sorted([p for p in pcs if p.get("upgrades")], key=lambda p: p.get("gain", 0), reverse=True)
+    maxed       = [p for p in pcs if not p.get("upgrades")]
+
+    await ctx.send(f"📋 **PC Report** — {len(upgradeable)} can upgrade, {len(maxed)} maxed out")
+
+    for pc in upgradeable + maxed:
+        embed = _build_pc_embed(pc)
+        view  = UpgradeView(str(pc["num"]), bool(pc.get("upgrades")))
+        await ctx.send(embed=embed, view=view)
 
 
 @bot.command(name="customize")
