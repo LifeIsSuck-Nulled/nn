@@ -55,7 +55,7 @@ def _run_tunnel():
         (["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ServerAliveInterval=30",
           "-R", f"80:localhost:{PORT}", "serveo.net"], r'https://\S+'),
         (["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ServerAliveInterval=30",
-          "-R", f"80:localhost:{PORT}", "nokey@localhost.run"], r'https://\S+'),
+          "-R", f"80:localhost:{PORT}", "nokey@localhost.run"], r'https://[a-z0-9]+\.lhr\.life'),
     ]:
         if _tunnel_url:
             break
