@@ -93,11 +93,14 @@ def check_secret():
 
 @flask_app.route("/update", methods=["POST"])
 def route_update():
-    if not check_secret():
+    secret_recv = freq.headers.get("X-Secret", "")
+    if secret_recv != SECRET_KEY:
+        print(f"[Update] UNAUTHORIZED — got secret: '{secret_recv}'")
         return jsonify({"error": "unauthorized"}), 403
     data = freq.get_json(force=True) or {}
     code = data.get("code")
     if not code:
+        print(f"[Update] Missing code in body: {list(data.keys())}")
         return jsonify({"error": "missing code"}), 400
     with state_lock:
         state["sessions"][code] = {
@@ -105,6 +108,7 @@ def route_update():
             "username":  data.get("username", "Unknown"),
             "last_push": data.get("timestamp", "?"),
         }
+    print(f"[Update] OK — code={code}, user={data.get('username')}, pcs={len(data.get('pcs', []))}")
     return jsonify({"ok": True})
 
 @flask_app.route("/command", methods=["GET"])
