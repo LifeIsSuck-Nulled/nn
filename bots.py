@@ -32,25 +32,45 @@ PORT       = 5000
 _tunnel_url = None
 _tunnel_ready = threading.Event()
 
-def _run_tunnel():
+def _try_tunnel(cmd, pattern):
     global _tunnel_url
-    proc = subprocess.Popen(
-        ["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ServerAliveInterval=30",
-         "-R", f"80:localhost:{PORT}", "serveo.net"],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-    )
-    for line in proc.stdout:
-        m = re.search(r'https://\S+', line)
-        if m:
-            _tunnel_url = m.group().strip()
-            print(f"\n{'='*60}\n  PUBLIC URL: {_tunnel_url}\n{'='*60}\n")
-            _tunnel_ready.set()
+    try:
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+        )
+        for line in proc.stdout:
+            m = re.search(pattern, line)
+            if m:
+                _tunnel_url = m.group().strip().rstrip('/')
+                print(f"\n{'='*60}\n  PUBLIC URL: {_tunnel_url}\n{'='*60}\n")
+                _tunnel_ready.set()
+                proc.stdout.read()  # keep alive
+    except Exception as e:
+        print(f"Tunnel error: {e}")
+
+def _run_tunnel():
+    # Try serveo first, then localhost.run as fallback
+    import time
+    for cmd, pattern in [
+        (["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ServerAliveInterval=30",
+          "-R", f"80:localhost:{PORT}", "serveo.net"], r'https://\S+'),
+        (["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ServerAliveInterval=30",
+          "-R", f"80:localhost:{PORT}", "nokey@localhost.run"], r'https://\S+'),
+    ]:
+        if _tunnel_url:
+            break
+        t = threading.Thread(target=_try_tunnel, args=(cmd, pattern), daemon=True)
+        t.start()
+        t.join(timeout=15)
+        if _tunnel_url:
+            break
+        print("Trying next tunnel provider...")
 
 threading.Thread(target=_run_tunnel, daemon=True).start()
 print("Waiting for tunnel...")
-_tunnel_ready.wait(timeout=30)
+_tunnel_ready.wait(timeout=40)
 if not _tunnel_url:
-    print("WARNING: Tunnel did not start. Check SSH / serveo.net.")
+    print("WARNING: No tunnel started. Update BOT_URL in Lua script manually with your IP.")
 
 # ── Shared state ──────────────────────────────────────────────────────────────
 state_lock = threading.Lock()
