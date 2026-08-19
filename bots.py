@@ -10,7 +10,7 @@ Commands:
   !unlink            — unlink your Discord from Roblox
 
 Setup (Termux):
-  pkg install python openssh
+  pkg install python openssh cloudflared
   pip install discord.py flask
   python bots.py
 ────────────────────────────────────────────────────────────────
@@ -39,38 +39,76 @@ def _try_tunnel(cmd, pattern):
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
         )
         for line in proc.stdout:
+            print(f"[tunnel] {line.rstrip()}")
             m = re.search(pattern, line)
             if m:
                 _tunnel_url = m.group().strip().rstrip('/')
                 print(f"\n{'='*60}\n  PUBLIC URL: {_tunnel_url}\n{'='*60}\n")
                 _tunnel_ready.set()
                 proc.stdout.read()  # keep alive
+    except FileNotFoundError:
+        print(f"[tunnel] Command not found: {cmd[0]}")
     except Exception as e:
-        print(f"Tunnel error: {e}")
+        print(f"[tunnel] Error: {e}")
 
 def _run_tunnel():
-    # Try serveo first, then localhost.run as fallback
-    import time
-    for cmd, pattern in [
-        (["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ServerAliveInterval=30",
-          "-R", f"80:localhost:{PORT}", "serveo.net"], r'https://\S+'),
-        (["ssh", "-o", "StrictHostKeyChecking=no", "-o", "ServerAliveInterval=30",
-          "-R", f"80:localhost:{PORT}", "nokey@localhost.run"], r'https://[a-z0-9]+\.lhr\.life'),
-    ]:
+    """
+    Try tunnels in order:
+      1. cloudflared  (most stable on Termux/Android — install with: pkg install cloudflared)
+      2. serveo.net   (SSH-based, no install needed)
+      3. localhost.run (SSH-based fallback)
+    """
+    providers = [
+        {
+            "name": "cloudflared",
+            "cmd": ["cloudflared", "tunnel", "--url", f"http://localhost:{PORT}"],
+            # cloudflared prints the URL in a box, e.g.:
+            #   https://some-random-words.trycloudflare.com
+            "pattern": r'https://[a-z0-9-]+\.trycloudflare\.com',
+        },
+        {
+            "name": "serveo",
+            "cmd": [
+                "ssh", "-o", "StrictHostKeyChecking=no",
+                "-o", "ServerAliveInterval=30",
+                "-R", f"80:localhost:{PORT}", "serveo.net"
+            ],
+            "pattern": r'https://\S+\.serveo\.net',
+        },
+        {
+            "name": "localhost.run",
+            "cmd": [
+                "ssh", "-o", "StrictHostKeyChecking=no",
+                "-o", "ServerAliveInterval=30",
+                "-R", f"80:localhost:{PORT}", "nokey@localhost.run"
+            ],
+            "pattern": r'https://[a-z0-9]+\.lhr\.life',
+        },
+    ]
+
+    for provider in providers:
         if _tunnel_url:
             break
-        t = threading.Thread(target=_try_tunnel, args=(cmd, pattern), daemon=True)
+        print(f"[tunnel] Trying {provider['name']}...")
+        t = threading.Thread(
+            target=_try_tunnel,
+            args=(provider["cmd"], provider["pattern"]),
+            daemon=True,
+        )
         t.start()
-        t.join(timeout=15)
+        t.join(timeout=20)
         if _tunnel_url:
+            print(f"[tunnel] Connected via {provider['name']}")
             break
-        print("Trying next tunnel provider...")
+        print(f"[tunnel] {provider['name']} did not respond in time, trying next...")
 
 threading.Thread(target=_run_tunnel, daemon=True).start()
-print("Waiting for tunnel...")
-_tunnel_ready.wait(timeout=40)
+print("Waiting for tunnel... (install cloudflared with: pkg install cloudflared)")
+_tunnel_ready.wait(timeout=60)
 if not _tunnel_url:
-    print("WARNING: No tunnel started. Update BOT_URL in Lua script manually with your IP.")
+    print("\nWARNING: No tunnel started.")
+    print("  Fix: run 'pkg install cloudflared' in Termux, then restart.")
+    print("  Or update BOT_URL in your Lua script with your local IP manually.\n")
 
 # ── Shared state ──────────────────────────────────────────────────────────────
 state_lock = threading.Lock()
@@ -131,7 +169,10 @@ def route_result():
         state["results"].append(data)
     return jsonify({"ok": True})
 
-threading.Thread(target=lambda: flask_app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False), daemon=True).start()
+threading.Thread(
+    target=lambda: flask_app.run(host="0.0.0.0", port=PORT, debug=False, use_reloader=False),
+    daemon=True,
+).start()
 
 # ── Discord bot ───────────────────────────────────────────────────────────────
 intents = discord.Intents.default()
@@ -162,7 +203,6 @@ class AllPCsView(discord.ui.View):
         self.code = code
         upgradeable = [p for p in pcs if p.get("upgrades")]
 
-        # One button per upgradeable PC (max 24 to leave room for Upgrade All)
         for pc in upgradeable[:24]:
             btn = discord.ui.Button(
                 label=f"⚙️ PC {pc['num']}",
@@ -171,7 +211,6 @@ class AllPCsView(discord.ui.View):
             btn.callback = self._make_cb(str(pc["num"]))
             self.add_item(btn)
 
-        # Upgrade All
         if upgradeable:
             all_btn = discord.ui.Button(
                 label="⬆️ Upgrade All",
@@ -237,10 +276,9 @@ async def cmd_upgrades(ctx):
         await ctx.send("❌ No PC data yet. Wait a moment and try again.")
         return
 
-    # Sort by PC number ascending
-    sorted_pcs   = sorted(pcs, key=_pc_num)
-    upgradeable  = [p for p in sorted_pcs if p.get("upgrades")]
-    maxed        = [p for p in sorted_pcs if not p.get("upgrades")]
+    sorted_pcs  = sorted(pcs, key=_pc_num)
+    upgradeable = [p for p in sorted_pcs if p.get("upgrades")]
+    maxed       = [p for p in sorted_pcs if not p.get("upgrades")]
 
     embed = discord.Embed(
         title=f"🖥️  {session['username']}'s PCs",
@@ -312,6 +350,8 @@ async def cmd_refresh(ctx):
 @bot.event
 async def on_ready():
     print(f"[Bot] Logged in as {bot.user}  |  Flask on :{PORT}")
+    if _tunnel_url:
+        print(f"[Bot] Tunnel active: {_tunnel_url}")
 
 # ── Result notifier ───────────────────────────────────────────────────────────
 last_channel = None
@@ -332,15 +372,20 @@ async def notify_results():
             state["results"].clear()
         if results and last_channel:
             for r in results:
-                pc_num  = r.get("pc", "?")
-                before  = r.get("before_hr", "?")
-                after   = r.get("after_hr", "?")
-                success = r.get("success", False)
+                pc_num   = r.get("pc", "?")
+                before   = r.get("before_hr", "?")
+                after    = r.get("after_hr", "?")
+                success  = r.get("success", False)
                 username = r.get("username", "")
                 title = f"✅  PC {pc_num} Upgraded!" if success else f"❌  PC {pc_num} — No Changes"
-                desc  = f"{before}/hr → **{after}/hr** (+{after - before}/hr)" if success else r.get("reason", "Already best.")
-                embed = discord.Embed(title=title, description=desc,
-                    color=0x57F287 if success else 0xED4245)
+                desc  = (
+                    f"{before}/hr → **{after}/hr** (+{after - before}/hr)"
+                    if success else r.get("reason", "Already best.")
+                )
+                embed = discord.Embed(
+                    title=title, description=desc,
+                    color=0x57F287 if success else 0xED4245,
+                )
                 if username:
                     embed.set_footer(text=f"Player: {username}")
                 await last_channel.send(embed=embed)
