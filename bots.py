@@ -10,7 +10,7 @@ Commands:
   !unlink            — unlink your Discord from Roblox
 
 Setup (Termux):
-  pkg install python openssh cloudflared
+  pkg install python openssh
   pip install discord.py flask
   python bots.py
 ────────────────────────────────────────────────────────────────
@@ -54,17 +54,19 @@ def _try_tunnel(cmd, pattern):
 def _run_tunnel():
     """
     Try tunnels in order:
-      1. cloudflared  (most stable on Termux/Android — install with: pkg install cloudflared)
-      2. serveo.net   (SSH-based, no install needed)
-      3. localhost.run (SSH-based fallback)
+      1. localhost.run  (SSH-based, no install, no account needed — most reliable on Termux)
+      2. serveo.net     (SSH-based fallback)
+      3. cloudflared    (install with: pkg install cloudflared)
     """
     providers = [
         {
-            "name": "cloudflared",
-            "cmd": ["cloudflared", "tunnel", "--url", f"http://localhost:{PORT}"],
-            # cloudflared prints the URL in a box, e.g.:
-            #   https://some-random-words.trycloudflare.com
-            "pattern": r'https://[a-z0-9-]+\.trycloudflare\.com',
+            "name": "localhost.run",
+            "cmd": [
+                "ssh", "-o", "StrictHostKeyChecking=no",
+                "-o", "ServerAliveInterval=30",
+                "-R", f"80:localhost:{PORT}", "nokey@localhost.run"
+            ],
+            "pattern": r'https://[a-f0-9]+\.lhr\.life',
         },
         {
             "name": "serveo",
@@ -76,13 +78,9 @@ def _run_tunnel():
             "pattern": r'https://\S+\.serveo\.net',
         },
         {
-            "name": "localhost.run",
-            "cmd": [
-                "ssh", "-o", "StrictHostKeyChecking=no",
-                "-o", "ServerAliveInterval=30",
-                "-R", f"80:localhost:{PORT}", "nokey@localhost.run"
-            ],
-            "pattern": r'https://[a-z0-9]+\.lhr\.life',
+            "name": "cloudflared",
+            "cmd": ["cloudflared", "tunnel", "--url", f"http://localhost:{PORT}"],
+            "pattern": r'https://[a-z0-9-]+\.trycloudflare\.com',
         },
     ]
 
@@ -103,12 +101,12 @@ def _run_tunnel():
         print(f"[tunnel] {provider['name']} did not respond in time, trying next...")
 
 threading.Thread(target=_run_tunnel, daemon=True).start()
-print("Waiting for tunnel... (install cloudflared with: pkg install cloudflared)")
+print("Waiting for tunnel via localhost.run...")
 _tunnel_ready.wait(timeout=60)
 if not _tunnel_url:
-    print("\nWARNING: No tunnel started.")
-    print("  Fix: run 'pkg install cloudflared' in Termux, then restart.")
-    print("  Or update BOT_URL in your Lua script with your local IP manually.\n")
+    print("\nWARNING: No tunnel started. All providers failed.")
+    print("  Make sure you have internet and openssh installed (pkg install openssh).")
+    print("  Or update BOT_URL in your Lua script manually.\n")
 
 # ── Shared state ──────────────────────────────────────────────────────────────
 state_lock = threading.Lock()
